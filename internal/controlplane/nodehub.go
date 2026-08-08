@@ -179,7 +179,7 @@ func (h *NodeHub) deliver(ctx context.Context, nodeID string, c *nodeConnection)
 		env := protocol.Envelope{Version: protocol.Version, MessageID: id, Type: kind, SentAt: time.Now().UTC(), Data: payload}
 		raw, _ := json.Marshal(env)
 		c.writeMu.Lock()
-		writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		writeCtx, cancel := context.WithTimeout(ctx, commandDeliveryTimeout(kind))
 		err = c.socket.Write(writeCtx, websocket.MessageText, raw)
 		cancel()
 		c.writeMu.Unlock()
@@ -191,6 +191,14 @@ func (h *NodeHub) deliver(ctx context.Context, nodeID string, c *nodeConnection)
 	_, _ = h.db.Exec(ctx, `UPDATE node_commands SET status='expired' WHERE node_id=$1 AND status IN ('pending','sent') AND expires_at<=now()`, nodeID)
 	return nil
 }
+
+func commandDeliveryTimeout(kind string) time.Duration {
+	if kind == "compliance.feed" {
+		return 2 * time.Minute
+	}
+	return 10 * time.Second
+}
+
 func (c *nodeConnection) write(ctx context.Context, kind, reply string, data any) error {
 	rawData, _ := json.Marshal(data)
 	env := protocol.Envelope{Version: protocol.Version, MessageID: uuid.NewString(), ReplyTo: reply, Type: kind, SentAt: time.Now().UTC(), Data: rawData}

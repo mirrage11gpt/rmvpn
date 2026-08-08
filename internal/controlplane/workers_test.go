@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseDomainsSkipsIsolatedInvalidLines(t *testing.T) {
@@ -14,6 +15,15 @@ func TestParseDomainsSkipsIsolatedInvalidLines(t *testing.T) {
 	}
 	if len(domains) != 2 || domains[0] != "valid.example" || domains[1] != "second.example" {
 		t.Fatalf("unexpected domains: %#v", domains)
+	}
+}
+
+func TestComplianceDeliveryGetsLargePayloadTimeout(t *testing.T) {
+	if got := commandDeliveryTimeout("compliance.feed"); got != 2*time.Minute {
+		t.Fatalf("unexpected compliance timeout: %s", got)
+	}
+	if got := commandDeliveryTimeout("device.upsert"); got != 10*time.Second {
+		t.Fatalf("unexpected regular command timeout: %s", got)
 	}
 }
 
