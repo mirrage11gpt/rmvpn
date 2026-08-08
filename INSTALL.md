@@ -51,15 +51,43 @@ TCP 80, TCP/UDP 443 и временно TCP 8443. После enrollment аген
 ```bash
 sudo apt update
 sudo apt install -y git openssl ca-certificates
-sudo mkdir -p /opt/risevpn
-sudo chown "$USER":"$USER" /opt/risevpn
-git clone https://github.com/mirrage11gpt/rmvpn.git /opt/risevpn
-cd /opt/risevpn
+cd "$HOME"
+git clone https://github.com/mirrage11gpt/rmvpn.git risevpn
+cd "$HOME/risevpn"
 git checkout main
 git pull --ff-only origin main
 docker --version
 docker compose version
 ```
+
+Домашний каталог выбран намеренно: на некоторых VPS `/opt` доступен Docker
+daemon только для чтения. Если репозиторий уже находится в `/opt/risevpn`,
+скопируйте его без удаления исходной копии:
+
+```bash
+mkdir -p "$HOME/risevpn"
+cp -a /opt/risevpn/. "$HOME/risevpn/"
+cd "$HOME/risevpn"
+```
+
+Проверьте, что Docker daemon локальный и видит bind mounts из текущего каталога:
+
+```bash
+docker context show
+findmnt -T "$PWD" -no TARGET,OPTIONS
+docker run --rm -v "$PWD:/src:ro" alpine:3.23 \
+  test -f /src/docker-compose.yml
+```
+
+Первая команда обычно должна показать `default`, а последняя — завершиться без
+ошибки. Если Docker сообщает `read-only file system` или не видит файл:
+
+- при remote context bind path ищется на машине Docker daemon, а не на VPS с CLI;
+- для LXC/OpenVZ хостер должен разрешить nesting и bind mounts;
+- если эти возможности недоступны, используйте KVM-VPS.
+
+Не продолжайте установку до успешной проверки: Compose использует bind mounts
+для Caddyfile, backup-скрипта и Docker secrets.
 
 ### Telegram OIDC
 
@@ -80,11 +108,16 @@ BotFather покажет Client ID и Client Secret. Telegram требует з�
 cp .env.example .env
 ```
 
-Сгенерируйте криптографические значения. Команда ничего не записывает на диск:
+Сгенерируйте криптографические значения. Эта команда не использует bind mount,
+поэтому работает даже до исправления доступа Docker к каталогу проекта, и
+не создаёт файлов с секретами — значения выводятся только в терминал:
 
 ```bash
-docker run --rm -v "$PWD:/src:ro" -w /src golang:1.26-alpine \
-  go run ./cmd/risevpn-keygen
+docker run --rm golang:1.26-alpine sh -ceu '
+  wget -qO /tmp/keygen.go \
+    https://raw.githubusercontent.com/mirrage11gpt/rmvpn/main/cmd/risevpn-keygen/main.go
+  go run /tmp/keygen.go
+'
 ```
 
 Перенесите шесть напечатанных строк в `.env`, затем заполните остальные поля:
@@ -271,7 +304,7 @@ sudo risevpn-node reenroll
 Обновление Control:
 
 ```bash
-cd /opt/risevpn
+cd "$HOME/risevpn"
 git fetch --tags origin
 git checkout <новый-тег>
 docker compose config --quiet
