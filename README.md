@@ -1,8 +1,58 @@
-# RiseVPN Node
+# RiseVPN
 
-Серверный агент локации RiseVPN и минимальный patch-set для Hysteria 2. Узел
-устанавливается на Ubuntu 26.04, работает на одном публичном IP и выдаёт
-одноразовый ключ `rvpn1_...` для будущего управляющего сервера.
+Monorepo RiseVPN: центральная веб‑платформа и серверный агент локации с
+минимальным patch-set для Hysteria 2. Узел устанавливается на Ubuntu 26.04,
+работает на одном публичном IP и выдаёт одноразовый ключ `rvpn1_...` для
+подключения к RiseVPN Control.
+
+## RiseVPN Control v0.2.0
+
+Центральный сервер — модульный Go‑монолит со встроенной React/Vite‑сборкой,
+PostgreSQL как источником истины и Redis для сессий, rate limits и короткого
+cache. Он реализует Telegram OIDC + PKCE, обязательный TOTP для администраторов,
+RBAC, append-only wallet ledger, подписки, отдельные device credentials,
+автовыбор локации для всех тарифов, подписанные quota leases, динамические
+v2RayTun subscriptions, compliance snapshots и durable ACK‑очередь команд узлов.
+
+Production‑контур разворачивается на одном VPS через Docker Compose:
+
+```bash
+cp .env.example .env
+./scripts/pki-init.sh
+# перенесите offline root за пределы VPS, затем подготовьте runtime secrets:
+cp pki/certs/intermediate-ca.pem secrets/node-ca.pem
+cp pki/online/intermediate-ca.key.enc secrets/node-ca-key.pem.enc
+printf '%s' 'пароль intermediate key' > secrets/node-ca-key-password
+openssl rand -base64 32 > secrets/restic-password
+# заполните .env, затем:
+docker compose config
+docker compose up -d --build
+```
+
+Caddy обслуживает публичный и control SNI на TCP/UDP 443. На control‑домене
+клиентский сертификат узла обязателен. Online intermediate CA хранится только в
+зашифрованном secret; offline root после выпуска intermediate убирается с VPS.
+Ежедневный backup шифруется restic, хранит 30 дневных снимков и автоматически
+проверяется через чтение каталога PostgreSQL dump.
+
+Перед production‑запуском задайте два домена, Telegram OIDC/bot credentials,
+base64url‑ключи из `.env.example`, российское S3‑совместимое backup‑хранилище и
+реквизиты оператора. Полное руководство по API находится в
+[`docs/openapi.yaml`](docs/openapi.yaml), control protocol v2 — в
+[`docs/control-protocol.md`](docs/control-protocol.md), визуальная система — в
+[`DESIGN.md`](DESIGN.md).
+
+Локальная проверка control и web:
+
+```bash
+go test ./...
+go vet ./...
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web build
+docker compose config
+```
+
+## RiseVPN Node
 
 ## Что реализовано
 
@@ -69,7 +119,7 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain node-msk-1.example.com \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.1.0
+  --version 0.2.0
 ```
 
 Установщик проверяет ОС, архитектуру, DNS, origin, занятые порты, minisign и
@@ -85,7 +135,7 @@ risevpn-node doctor
 risevpn-node logs -f
 risevpn-node enrollment show
 risevpn-node reenroll
-risevpn-node update --version 0.1.1
+risevpn-node update --version 0.2.1
 risevpn-node uninstall
 risevpn-node uninstall --purge-data
 ```

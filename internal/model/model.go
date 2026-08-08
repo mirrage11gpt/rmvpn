@@ -46,6 +46,10 @@ type Device struct {
 	UsedBytes        int64
 	LeaseBytes       int64
 	LeaseExpires     time.Time
+	OverrideUpBPS    int64
+	OverrideDownBPS  int64
+	OverrideP2P      bool
+	OverrideExpires  time.Time
 }
 
 type SessionPolicy struct {

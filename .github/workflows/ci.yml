@@ -8,6 +8,24 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
   agent:
     runs-on: ubuntu-latest
     steps:
@@ -20,8 +38,15 @@ jobs:
       - run: go vet ./...
       - run: go build -trimpath -o target/risevpn-node ./cmd/risevpn-node
       - run: go build -trimpath -o target/risevpn-mock-controller ./cmd/risevpn-mock-controller
+      - run: go build -trimpath -o target/risevpn-control ./cmd/risevpn-control
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
-      - run: shellcheck install.sh packaging/risevpn-node-admin packaging/risevpn-cert-* scripts/*.sh
+      - run: shellcheck install.sh packaging/risevpn-node-admin packaging/risevpn-cert-* scripts/*.sh deploy/*.sh
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker build -f Dockerfile.control .
 
   hysteria-patches:
     runs-on: ubuntu-latest

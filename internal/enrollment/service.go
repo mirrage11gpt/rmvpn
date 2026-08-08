@@ -40,6 +40,8 @@ type ClaimRequest struct {
 	ClaimToken          string `json:"claimToken"`
 	ControllerURL       string `json:"controllerUrl"`
 	ControllerPublicKey string `json:"controllerPublicKey"`
+	QuotaPublicKey      string `json:"quotaPublicKey,omitempty"`
+	CompliancePublicKey string `json:"compliancePublicKey,omitempty"`
 	NodeCertificatePEM  string `json:"nodeCertificatePem"`
 	ControllerCAPEM     string `json:"controllerCaPem"`
 }
@@ -134,8 +136,33 @@ func (s *Service) Claim(ctx context.Context, request ClaimRequest) error {
 	if !ok || !certPublic.Equal(ed25519.PublicKey(publicRaw)) {
 		return errors.New("node certificate does not match this node identity")
 	}
-	return s.store.Claim(ctx, security.Hash(request.ClaimToken), request.ControllerURL,
-		request.ControllerPublicKey, request.NodeCertificatePEM, request.ControllerCAPEM, s.now().UTC())
+	if request.QuotaPublicKey != "" {
+		raw, err := security.Decode(request.QuotaPublicKey)
+		if err != nil || len(raw) != ed25519.PublicKeySize {
+			return errors.New("quotaPublicKey must be a base64url Ed25519 public key")
+		}
+	}
+	if request.CompliancePublicKey != "" {
+		raw, err := security.Decode(request.CompliancePublicKey)
+		if err != nil || len(raw) != ed25519.PublicKeySize {
+			return errors.New("compliancePublicKey must be a base64url Ed25519 public key")
+		}
+	}
+	if err := s.store.Claim(ctx, security.Hash(request.ClaimToken), request.ControllerURL,
+		request.ControllerPublicKey, request.NodeCertificatePEM, request.ControllerCAPEM, s.now().UTC()); err != nil {
+		return err
+	}
+	states := map[string]string{}
+	if request.QuotaPublicKey != "" {
+		states["quota_public_key"] = request.QuotaPublicKey
+	}
+	if request.CompliancePublicKey != "" {
+		states["compliance_public_key"] = request.CompliancePublicKey
+	}
+	if len(states) > 0 {
+		return s.store.SetStates(ctx, states)
+	}
+	return nil
 }
 
 func (s *Service) ensureIdentity(ctx context.Context) error {

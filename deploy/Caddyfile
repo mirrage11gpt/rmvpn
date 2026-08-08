@@ -1,0 +1,37 @@
+{
+  email {$ACME_EMAIL}
+  admin off
+  servers {
+    protocols h1 h2 h3
+    strict_sni_host on
+  }
+}
+
+{$PUBLIC_DOMAIN} {
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Frame-Options "DENY"
+    -Server
+  }
+  reverse_proxy control:8080 {
+    header_up -X-RiseVPN-mTLS
+    header_up -X-RiseVPN-Client-Serial
+  }
+}
+
+{$CONTROL_DOMAIN} {
+  tls {
+    client_auth {
+      mode require_and_verify
+      trust_pool file /run/secrets/node_ca.pem
+    }
+  }
+  @node path /v2/nodes/connect
+  reverse_proxy @node control:8080 {
+    flush_interval -1
+    header_up X-RiseVPN-mTLS verified
+    header_up X-RiseVPN-Client-Serial {tls_client_serial}
+  }
+  respond 404
+}

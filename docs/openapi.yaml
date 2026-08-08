@@ -1,0 +1,71 @@
+openapi: 3.1.0
+info:
+  title: RiseVPN Control API
+  version: 0.2.0
+  description: UTC timestamps, UUID identifiers, integer bytes and integer kopecks.
+servers: [{url: https://risevpn.example/api/v1}]
+paths:
+  /plans:
+    get: {operationId: listPlans, responses: {'200': {description: Tariff catalog}}}
+  /network:
+    get: {operationId: getNetwork, responses: {'200': {description: Actual network health}}}
+  /me:
+    get: {operationId: getMe, security: [{cookieSession: []}], responses: {'200': {description: Current account}, '401': {$ref: '#/components/responses/Problem'}}}
+  /subscription:
+    get: {operationId: getSubscription, security: [{cookieSession: []}], responses: {'200': {description: Subscription and usage}}}
+  /subscription/plan:
+    post: {operationId: changePlan, security: [{cookieSession: [], csrf: []}], responses: {'202': {description: Upgrade or scheduled downgrade}, '409': {$ref: '#/components/responses/Problem'}}}
+  /devices:
+    get: {operationId: listDevices, security: [{cookieSession: []}], responses: {'200': {description: Device slots}}}
+    post:
+      operationId: createDevice
+      security: [{cookieSession: [], csrf: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name], properties: {name: {type: string, maxLength: 80}}}}}}
+      responses: {'201': {description: Device and one-time visible subscription URL}, '409': {$ref: '#/components/responses/Problem'}}
+  /devices/{id}/rebind:
+    post:
+      operationId: rebindDevice
+      security: [{cookieSession: [], csrf: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'204': {description: Credential rotated and old session revoked}, '429': {$ref: '#/components/responses/Problem'}}
+  /admin/mfa:
+    get: {operationId: adminMFAStatus, security: [{cookieSession: []}], responses: {'200': {description: TOTP enrollment and current-session verification state}, '403': {$ref: '#/components/responses/Problem'}}}
+  /admin/mfa/setup:
+    post: {operationId: adminMFASetup, security: [{cookieSession: [], csrf: []}], responses: {'201': {description: One-time TOTP secret and otpauth URI}, '409': {$ref: '#/components/responses/Problem'}}}
+  /admin/mfa/verify:
+    post:
+      operationId: adminMFAVerify
+      security: [{cookieSession: [], csrf: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [code], properties: {code: {type: string, pattern: '^[0-9]{6}$'}}}}}}
+      responses: {'200': {description: Current admin session is MFA verified}, '401': {$ref: '#/components/responses/Problem'}}
+  /admin/overview:
+    get: {operationId: adminOverview, security: [{cookieSession: []}], responses: {'200': {description: Operations overview}, '403': {$ref: '#/components/responses/Problem'}}}
+  /admin/nodes/enroll:
+    post:
+      operationId: enrollNode
+      security: [{cookieSession: [], csrf: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [bundle], properties: {bundle: {type: string, pattern: '^rvpn1_'}}}}}}
+      responses: {'201': {description: Bundle claimed and 30-day certificate issued}, '400': {$ref: '#/components/responses/Problem'}}
+  /admin/nodes/{nodeID}/commands:
+    post:
+      operationId: enqueueNodeCommand
+      security: [{cookieSession: [], csrf: []}]
+      parameters: [{name: nodeID, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'202': {description: Durable command queued pending ACK}}
+  /admin/wallets/{userID}/credit:
+    post:
+      operationId: creditWallet
+      security: [{cookieSession: [], csrf: []}]
+      parameters: [{name: userID, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'201': {description: Append-only ledger entry created}}
+components:
+  securitySchemes:
+    cookieSession: {type: apiKey, in: cookie, name: rvpn_session}
+    csrf: {type: apiKey, in: header, name: X-CSRF-Token}
+  responses:
+    Problem: {description: RFC 9457 problem, content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}}
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties: {type: {type: string, format: uri}, title: {type: string}, status: {type: integer}, detail: {type: string}}

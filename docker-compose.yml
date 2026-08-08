@@ -1,0 +1,107 @@
+name: risevpn
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      CONTROL_DOMAIN: ${CONTROL_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443/tcp"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    secrets: [node_ca.pem]
+    depends_on:
+      control: {condition: service_healthy}
+
+  control:
+    build:
+      context: .
+      dockerfile: Dockerfile.control
+    restart: unless-stopped
+    environment:
+      RISEVPN_LISTEN: :8080
+      RISEVPN_PUBLIC_URL: https://${PUBLIC_DOMAIN}
+      RISEVPN_CONTROL_URL: wss://${CONTROL_DOMAIN}/v2/nodes/connect
+      DATABASE_URL: postgres://risevpn:${POSTGRES_PASSWORD}@postgres:5432/risevpn?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      TELEGRAM_CLIENT_ID: ${TELEGRAM_CLIENT_ID}
+      TELEGRAM_CLIENT_SECRET: ${TELEGRAM_CLIENT_SECRET}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      SESSION_SECRET: ${SESSION_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      HWID_HMAC_KEY: ${HWID_HMAC_KEY}
+      QUOTA_ED25519_PRIVATE_KEY: ${QUOTA_ED25519_PRIVATE_KEY}
+      COMPLIANCE_ED25519_PRIVATE_KEY: ${COMPLIANCE_ED25519_PRIVATE_KEY}
+      NODE_CA_CERT_FILE: /run/secrets/node_ca.pem
+      NODE_CA_KEY_FILE: /tmp/node-ca.key
+    secrets: [node_ca.pem, node_ca_key_encrypted, node_ca_key_password]
+    expose: ["8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 8
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: risevpn
+      POSTGRES_USER: risevpn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risevpn -d risevpn"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4.5-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backup:
+    image: restic/restic:0.18.0
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/opt/risevpn/backup.sh"]
+    environment:
+      DATABASE_URL: postgres://risevpn:${POSTGRES_PASSWORD}@postgres:5432/risevpn?sslmode=disable
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic_password
+      AWS_ACCESS_KEY_ID: ${BACKUP_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_SECRET_KEY}
+      AWS_DEFAULT_REGION: ${BACKUP_REGION:-ru-central1}
+    volumes:
+      - ./deploy/backup.sh:/opt/risevpn/backup.sh:ro
+      - backup_scratch:/backup
+    secrets: [restic_password]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  backup_scratch:
+
+secrets:
+  node_ca.pem: {file: ./secrets/node-ca.pem}
+  node_ca_key_encrypted: {file: ./secrets/node-ca-key.pem.enc}
+  node_ca_key_password: {file: ./secrets/node-ca-key-password}
+  restic_password: {file: ./secrets/restic-password}

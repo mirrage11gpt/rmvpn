@@ -1,4 +1,10 @@
-# RiseVPN Node control protocol v1
+# RiseVPN Node control protocol v1/v2
+
+## Protocol v2 (Node v0.2)
+
+Каждое WebSocket-сообщение использует envelope с `version`, `messageId`, `replyTo`, `type`, `sentAt` и `data`. Узел объявляет версии и capabilities в `hello`. Контроллер хранит команды в PostgreSQL, повторяет их с bounded backoff и считает применёнными только после `ack`; `nack` сохраняет причину. Узел запоминает `messageId`, поэтому повтор команды идемпотентен.
+
+v2 добавляет подписанные `quota.lease`, `device.upsert`, `device.revoke`, `session.kick`, `policy.override`, `certificate.rotate`, `drain` и атомарный `update`. Usage учитывается один раз по `(nodeId,eventId)`. Envelope v1 без новых полей продолжает читаться во время rollout.
 
 ## Enrollment bundle
 
@@ -13,7 +19,7 @@
   "nodePublicKey": "base64url-ed25519-public-key",
   "claimToken": "base64url-256-bit-secret",
   "expiresAt": "2026-08-09T10:00:00Z",
-  "agentVersion": "0.1.0"
+  "agentVersion": "0.2.0"
 }
 ```
 
@@ -27,8 +33,10 @@ Bundle является секретом до claim. Изменение public k
 ```json
 {
   "claimToken": "...",
-  "controllerUrl": "wss://control.example.com/v1/nodes/connect",
+  "controllerUrl": "wss://control.example.com/v2/nodes/connect",
   "controllerPublicKey": "base64url-ed25519-public-key",
+  "quotaPublicKey": "base64url-ed25519-public-key",
+  "compliancePublicKey": "base64url-ed25519-public-key",
   "nodeCertificatePem": "-----BEGIN CERTIFICATE-----...",
   "controllerCaPem": "-----BEGIN CERTIFICATE-----..."
 }
@@ -44,7 +52,7 @@ mTLS 1.3.
 Каждое WebSocket text message имеет форму:
 
 ```json
-{"type":"message.type","data":{}}
+{"version":2,"messageId":"uuid","replyTo":"optional-command-uuid","type":"message.type","sentAt":"2026-08-08T19:00:00Z","data":{}}
 ```
 
 Node → controller:

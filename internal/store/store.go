@@ -97,6 +97,17 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	for column, definition := range map[string]string{"override_up_bps": "INTEGER NOT NULL DEFAULT 0", "override_down_bps": "INTEGER NOT NULL DEFAULT 0", "override_p2p": "INTEGER NOT NULL DEFAULT 0", "override_expires": "INTEGER NOT NULL DEFAULT 0"} {
+		exists, err := s.columnExists(ctx, "devices", column)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err = s.db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN `+column+` `+definition); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -220,13 +231,13 @@ func (s *Store) UpsertDevice(ctx context.Context, d model.Device) error {
 
 func (s *Store) DeviceByCredentialHash(ctx context.Context, hash string) (model.Device, bool, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT device_id,credential_hash,plan,active,subscription_ends,
-		period_ends,quota_bytes,used_bytes,lease_bytes,lease_expires FROM devices WHERE credential_hash=?`, hash)
+		period_ends,quota_bytes,used_bytes,lease_bytes,lease_expires,override_up_bps,override_down_bps,override_p2p,override_expires FROM devices WHERE credential_hash=?`, hash)
 	return scanDevice(row)
 }
 
 func (s *Store) DeviceByID(ctx context.Context, id string) (model.Device, bool, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT device_id,credential_hash,plan,active,subscription_ends,
-		period_ends,quota_bytes,used_bytes,lease_bytes,lease_expires FROM devices WHERE device_id=?`, id)
+		period_ends,quota_bytes,used_bytes,lease_bytes,lease_expires,override_up_bps,override_down_bps,override_p2p,override_expires FROM devices WHERE device_id=?`, id)
 	return scanDevice(row)
 }
 
@@ -236,9 +247,10 @@ func scanDevice(row rowScanner) (model.Device, bool, error) {
 	var d model.Device
 	var plan string
 	var active int
-	var subscription, period, leaseExpires int64
+	var subscription, period, leaseExpires, overrideExpires int64
+	var overrideP2P int
 	err := row.Scan(&d.ID, &d.CredentialHash, &plan, &active, &subscription, &period,
-		&d.QuotaBytes, &d.UsedBytes, &d.LeaseBytes, &leaseExpires)
+		&d.QuotaBytes, &d.UsedBytes, &d.LeaseBytes, &leaseExpires, &d.OverrideUpBPS, &d.OverrideDownBPS, &overrideP2P, &overrideExpires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Device{}, false, nil
 	}
@@ -249,7 +261,14 @@ func scanDevice(row rowScanner) (model.Device, bool, error) {
 	d.SubscriptionEnds = time.Unix(subscription, 0).UTC()
 	d.PeriodEnds = time.Unix(period, 0).UTC()
 	d.LeaseExpires = time.Unix(leaseExpires, 0).UTC()
+	d.OverrideP2P = overrideP2P == 1
+	d.OverrideExpires = time.Unix(overrideExpires, 0).UTC()
 	return d, true, nil
+}
+
+func (s *Store) ApplyPolicyOverride(ctx context.Context, id string, up, down int64, p2p bool, expires time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET override_up_bps=?,override_down_bps=?,override_p2p=?,override_expires=? WHERE device_id=?`, up, down, boolInt(p2p), expires.Unix(), id)
+	return err
 }
 
 func (s *Store) AddUsage(ctx context.Context, deviceID string, txBytes, rxBytes int64, now time.Time) (int64, error) {

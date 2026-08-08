@@ -58,13 +58,18 @@ func (s *Service) Authenticate(ctx context.Context, credential string) (model.Au
 		return model.AuthDecision{OK: false, Reason: "quota_lease_exhausted"}, nil
 	}
 	up, down := base.UpBPS, base.DownBPS
+	p2pAllowed := base.P2PAllowed
 	if exhausted {
 		up, down = base.ThrottleBPS, base.ThrottleBPS
+	}
+	if device.OverrideExpires.After(now) {
+		up, down = device.OverrideUpBPS, device.OverrideDownBPS
+		p2pAllowed = device.OverrideP2P
 	}
 	return model.AuthDecision{
 		OK: true, ID: device.ID,
 		Policy: &model.SessionPolicy{UpBPS: up, DownBPS: down, Priority: base.Priority,
-			P2PAllowed: base.P2PAllowed, DeviceID: device.ID, Throttled: exhausted, Compliance: true},
+			P2PAllowed: p2pAllowed, DeviceID: device.ID, Throttled: exhausted, Compliance: true},
 	}, nil
 }
 
@@ -87,7 +92,11 @@ func (s *Service) Authorize(ctx context.Context, deviceID, address string, initi
 	if !ok {
 		return false, "unknown_plan", nil
 	}
-	if !planPolicy.P2PAllowed && isP2P(address, initialPayload) {
+	p2pAllowed := planPolicy.P2PAllowed
+	if device.OverrideExpires.After(s.now().UTC()) {
+		p2pAllowed = device.OverrideP2P
+	}
+	if !p2pAllowed && isP2P(address, initialPayload) {
 		return false, "p2p_blocked", nil
 	}
 	return true, "", nil

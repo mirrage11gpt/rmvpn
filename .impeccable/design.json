@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-08T18:57:56Z",
+  "title": "Design System: RiseVPN Control",
+  "extensions": {
+    "colorMeta": {
+      "signal-cobalt": {"role": "primary", "displayName": "Signal Cobalt", "canonical": "#2f63ff", "tonalRamp": ["oklch(20% 0.12 264)", "oklch(30% 0.16 264)", "oklch(42% 0.21 264)", "#2f63ff", "#6790ff", "oklch(76% 0.12 264)", "oklch(87% 0.06 264)", "oklch(95% 0.025 264)"]},
+      "signal-cobalt-high": {"role": "primary", "displayName": "Signal Cobalt High", "canonical": "#6790ff", "tonalRamp": ["oklch(20% 0.11 264)", "oklch(31% 0.14 264)", "oklch(44% 0.17 264)", "oklch(57% 0.18 264)", "#6790ff", "oklch(77% 0.12 264)", "oklch(87% 0.06 264)", "oklch(95% 0.025 264)"]},
+      "verified-green": {"role": "secondary", "displayName": "Verified Green", "canonical": "#48ca86", "tonalRamp": ["oklch(18% 0.07 154)", "oklch(29% 0.10 154)", "oklch(41% 0.13 154)", "oklch(54% 0.15 154)", "#48ca86", "oklch(76% 0.12 154)", "oklch(87% 0.06 154)", "oklch(95% 0.025 154)"]},
+      "caution-amber": {"role": "tertiary", "displayName": "Caution Amber", "canonical": "#e6ac58", "tonalRamp": ["oklch(18% 0.05 75)", "oklch(29% 0.08 75)", "oklch(41% 0.11 75)", "oklch(54% 0.13 75)", "#e6ac58", "oklch(77% 0.10 75)", "oklch(87% 0.05 75)", "oklch(95% 0.02 75)"]},
+      "fault-red": {"role": "tertiary", "displayName": "Fault Red", "canonical": "#e45d55", "tonalRamp": ["oklch(18% 0.07 27)", "oklch(29% 0.11 27)", "oklch(41% 0.15 27)", "oklch(54% 0.18 27)", "#e45d55", "oklch(76% 0.11 27)", "oklch(87% 0.055 27)", "oklch(95% 0.02 27)"]},
+      "instrument-ink": {"role": "neutral", "displayName": "Instrument Ink", "canonical": "#edf1f5", "tonalRamp": ["#1a1d20", "#303439", "#4c5258", "#6c747d", "#929ba5", "#b8c0c8", "#d7dde3", "#edf1f5"]},
+      "secondary-ink": {"role": "neutral", "displayName": "Secondary Ink", "canonical": "#9ca8b7", "tonalRamp": ["#171a1e", "#2b3036", "#434a52", "#606a75", "#7d8996", "#9ca8b7", "#cbd1d8", "#edf0f3"]},
+      "graphite-black": {"role": "neutral", "displayName": "Graphite Black", "canonical": "#090d12", "tonalRamp": ["#090d12", "#151b22", "#27313b", "#3e4a56", "#66727d", "#919ba5", "#c4cbd1", "#edf0f2"]},
+      "deep-recess": {"role": "neutral", "displayName": "Deep Recess", "canonical": "#0d131a", "tonalRamp": ["#080c10", "#0d131a", "#202a34", "#394550", "#606c77", "#8d98a2", "#c2c9cf", "#edf0f2"]},
+      "steel-surface": {"role": "neutral", "displayName": "Steel Surface", "canonical": "#121a24", "tonalRamp": ["#080c11", "#121a24", "#25313e", "#3f4c59", "#667481", "#919da8", "#c4ccd3", "#edf0f3"]},
+      "raised-steel": {"role": "neutral", "displayName": "Raised Steel", "canonical": "#18222e", "tonalRamp": ["#090d12", "#18222e", "#2c3946", "#465461", "#6c7985", "#96a1ab", "#c7ced4", "#eef1f3"]},
+      "structural-line": {"role": "neutral", "displayName": "Structural Line", "canonical": "#344150", "tonalRamp": ["#0b0f14", "#1b242d", "#344150", "#4e5c69", "#74818c", "#9da7b0", "#ccd2d7", "#eff1f3"]}
+    },
+    "typographyMeta": {
+      "display": {"displayName": "Display", "purpose": "Oversized Persuade statements and full-page outcomes."},
+      "headline": {"displayName": "Headline", "purpose": "Section introductions in the public surface."},
+      "title": {"displayName": "Title", "purpose": "Panel outcomes, plans, routes, and operational states."},
+      "body": {"displayName": "Body", "purpose": "Readable explanations, help, warning detail, and legal copy."},
+      "label": {"displayName": "Instrument Label", "purpose": "Uppercase captions, metadata, and compact state readouts."}
+    },
+    "shadows": [
+      {"name": "instrument-drop", "value": "0 28px 65px #000a", "purpose": "Grounds the signature route instrument."},
+      {"name": "instrument-bezel", "value": "inset 0 0 0 7px #080c11, inset 0 0 0 9px #344150", "purpose": "Builds the nested equipment casing."},
+      {"name": "action-signal", "value": "0 14px 34px #102c8866", "purpose": "Restrained cobalt field beneath the primary action."}
+    ],
+    "motion": [
+      {"name": "state-standard", "value": "200ms ease", "purpose": "Quiet background and state transitions."},
+      {"name": "action-spring", "value": "240ms cubic-bezier(.16,1,.3,1)", "purpose": "Primary action lift and press response."},
+      {"name": "route-pulse", "value": "2200ms cubic-bezier(.16,1,.3,1) infinite", "purpose": "Verified route availability pulse; disabled under reduced motion."},
+      {"name": "reduced-motion", "value": "0.01ms, 1 iteration", "purpose": "Collapses animation and transition duration when reduced motion is requested."}
+    ],
+    "breakpoints": [
+      {"name": "compact", "value": "760px"},
+      {"name": "condensed", "value": "1100px"}
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single dominant forward action on a surface.",
+      "html": "<button class=\"ds-primary-action\"><span>НАЧАТЬ TRIAL</span><span aria-hidden=\"true\">→</span></button>",
+      "css": ".ds-primary-action{min-width:260px;height:64px;display:inline-flex;align-items:center;justify-content:space-between;gap:32px;padding:0 26px;border:0;background:var(--blue,#2f63ff);color:#fff;font:700 16px Manrope,sans-serif;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));box-shadow:0 14px 34px #102c8866;transition:transform .24s cubic-bezier(.16,1,.3,1),background .24s}.ds-primary-action:hover{background:#3e70ff;transform:translateY(-2px)}.ds-primary-action:active{transform:translateY(1px)}.ds-primary-action:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    },
+    {
+      "name": "Secondary Cabinet Action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A compact local action inside an operational panel.",
+      "html": "<button class=\"ds-secondary-action\">ДОБАВИТЬ УСТРОЙСТВО</button>",
+      "css": ".ds-secondary-action{padding:10px 14px;border:1px solid #40516a;background:#162139;color:#fff;font:600 12px Manrope,sans-serif;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));cursor:pointer;transition:background .2s}.ds-secondary-action:hover{background:#1d2b49}.ds-secondary-action:active{background:#121c30}.ds-secondary-action:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    },
+    {
+      "name": "Secure Code Field",
+      "kind": "input",
+      "refersTo": "input-secure",
+      "description": "A recessed field for MFA and other deliberate numeric entry.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-code\">КОД ИЗ ПРИЛОЖЕНИЯ</label><input class=\"ds-secure-field\" id=\"ds-code\" inputmode=\"numeric\" value=\"482 019\" />",
+      "css": ".ds-field-label{display:block;margin-bottom:10px;color:#8d99a8;font:600 11px Manrope,sans-serif}.ds-secure-field{width:100%;height:58px;padding:0 18px;border:1px solid #46566a;background:var(--deep-recess,#0d131a);color:#fff;font:600 26px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif;letter-spacing:.25em}.ds-secure-field:hover{border-color:#607083}.ds-secure-field:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    },
+    {
+      "name": "Operational Panel",
+      "kind": "card",
+      "refersTo": "panel-operational",
+      "description": "The standard cabinet container for a current state and its supporting metric.",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><span>ТЕКУЩИЙ РЕЖИМ</span><b>PLUS</b></div><h3>ПОДКЛЮЧЕНИЕ АКТИВНО</h3><p>Локация выбирается автоматически при каждом безопасном переключении.</p><div class=\"ds-usage\"><i style=\"width:37%\"></i></div></section>",
+      "css": ".ds-panel{padding:28px;border:1px solid var(--line,#344150);background:#101720;color:var(--ink,#edf1f5);clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))}.ds-panel-head{display:flex;align-items:center;justify-content:space-between}.ds-panel-head span{color:#7f8d9d;font:600 11px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif;letter-spacing:.14em}.ds-panel-head b{color:var(--blue-hi,#6790ff);font:600 25px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif}.ds-panel h3{margin:52px 0 12px;font:600 40px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif}.ds-panel p{color:var(--muted,#9ca8b7);font:400 12px/1.6 Manrope,sans-serif}.ds-usage{height:8px;margin-top:28px;background:#26313d}.ds-usage i{display:block;height:100%;background:var(--blue,#2f63ff)}.ds-panel:focus-within{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    },
+    {
+      "name": "Verified Status",
+      "kind": "chip",
+      "refersTo": "status-verified",
+      "description": "An explicit healthy or ready readout, never a decorative badge.",
+      "html": "<span class=\"ds-status-verified\"><span aria-hidden=\"true\">✓</span> МАРШРУТ ПРОВЕРЕН</span>",
+      "css": ".ds-status-verified{min-width:232px;height:44px;padding:0 20px;display:inline-flex;align-items:center;justify-content:center;gap:10px;border:1px solid #2c7450;background:#0c1d16;color:var(--green,#48ca86);font:600 15px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif;letter-spacing:.1em}.ds-status-verified:hover{border-color:var(--green,#48ca86)}.ds-status-verified:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    },
+    {
+      "name": "Cabinet Navigation Item",
+      "kind": "nav",
+      "description": "The cut-corner active item used in the desktop rail and adapted to the mobile bottom bar.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Кабинет\"><a class=\"ds-nav-item ds-active\" href=\"#\"><span aria-hidden=\"true\">◉</span> ОБЗОР</a><a class=\"ds-nav-item\" href=\"#\"><span aria-hidden=\"true\">▣</span> УСТРОЙСТВА</a></nav>",
+      "css": ".ds-nav{width:220px;display:grid;gap:5px;padding:12px;background:#0b1016}.ds-nav-item{display:flex;align-items:center;gap:12px;padding:13px 14px;color:#8f9cab;font:500 13px Manrope,sans-serif;text-decoration:none;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));transition:background .2s,color .2s}.ds-nav-item:hover{color:#fff;background:#111a26}.ds-nav-item.ds-active{background:#17243b;color:#dfe7ff}.ds-nav-item:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:2px}"
+    },
+    {
+      "name": "Grace Warning",
+      "kind": "custom",
+      "description": "A calm operational warning that names the state and its consequence.",
+      "html": "<div class=\"ds-warning\" role=\"status\"><span class=\"ds-warning-icon\" aria-hidden=\"true\">!</span><div><b>ПОДПИСКА В GRACE</b><p>До блокировки действует 1 Мбит/с без P2P. Пополните баланс до указанного срока.</p></div></div>",
+      "css": ".ds-warning{display:flex;gap:16px;padding:20px 24px;border:1px solid #956f2f;background:#211b10;color:var(--ink,#edf1f5);font-family:Manrope,sans-serif}.ds-warning-icon{width:22px;height:22px;display:grid;place-items:center;border:1px solid var(--amber,#e6ac58);color:var(--amber,#e6ac58);font-weight:700}.ds-warning b{font:600 15px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif;letter-spacing:.04em}.ds-warning p{margin:5px 0 0;color:#c1ae91;font-size:12px;line-height:1.5}.ds-warning:hover{border-color:var(--amber,#e6ac58)}.ds-warning:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    },
+    {
+      "name": "Route Instrument",
+      "kind": "custom",
+      "description": "The signature proof component showing candidates converging on one verified automatic route.",
+      "html": "<section class=\"ds-instrument\" aria-label=\"Автоматический выбор маршрута\"><div class=\"ds-instrument-cap\"><span>RISEVPN / AUTO ROUTE</span><b>R-05 / MEASURE</b></div><svg viewBox=\"0 0 560 230\" role=\"img\" aria-label=\"Пять маршрутов, выбран маршрут 03\"><g class=\"ds-candidates\"><path d=\"M30 35 C180 35 260 100 400 115\"/><path d=\"M30 75 C180 75 260 105 400 115\"/><path class=\"ds-selected\" d=\"M30 115 C180 115 260 115 400 115\"/><path d=\"M30 155 C180 155 260 125 400 115\"/><path d=\"M30 195 C180 195 260 130 400 115\"/></g><g class=\"ds-verified\"><circle cx=\"430\" cy=\"115\" r=\"28\"/><path d=\"M418 115l8 8 17-19\"/></g></svg><div class=\"ds-instrument-result\"><b>ROUTE 03 · 28 MS</b><small>LOAD 37% / COMPLIANCE OK</small></div></section>",
+      "css": ".ds-instrument{position:relative;width:min(680px,100%);height:380px;overflow:hidden;border:1px solid #607083;background:#101720;color:var(--ink,#edf1f5);clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);box-shadow:0 28px 65px #000a,inset 0 0 0 7px #080c11,inset 0 0 0 9px #344150}.ds-instrument:before{content:'';position:absolute;inset:18px;border:1px solid #4a596a;box-shadow:inset 0 0 0 6px #0a0e13,inset 0 0 0 7px #283441}.ds-instrument-cap{position:relative;z-index:2;height:54px;padding:0 42px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #4c5a6a;background:linear-gradient(180deg,#1b242e,#10161d);color:#8896a6;font:600 12px/1 'Roboto Condensed Variable','Arial Narrow',sans-serif;letter-spacing:.14em}.ds-instrument svg{position:absolute;inset:78px 34px 76px;width:calc(100% - 68px);height:220px;background-image:linear-gradient(#34415022 1px,transparent 1px),linear-gradient(90deg,#34415022 1px,transparent 1px);background-size:100% 20%,16.66% 100%}.ds-candidates path{fill:none;stroke:#566274;stroke-width:2;stroke-dasharray:7 8}.ds-candidates .ds-selected{stroke:var(--blue,#2f63ff);stroke-width:4;stroke-dasharray:none}.ds-verified circle{fill:#0d1717;stroke:var(--green,#48ca86);stroke-width:3}.ds-verified path{fill:none;stroke:#d9ffea;stroke-width:5}.ds-instrument-result{position:absolute;left:54px;bottom:26px;display:grid;gap:3px;padding:9px 16px;border:1px solid #405064;background:#0b1118;font-family:'Roboto Condensed Variable','Arial Narrow',sans-serif}.ds-instrument-result b{color:#b6c6ff;letter-spacing:.05em}.ds-instrument-result small{color:#7f8b98;letter-spacing:.08em}.ds-instrument:hover{border-color:#718397}.ds-instrument:focus-visible{outline:2px solid var(--blue-hi,#6790ff);outline-offset:4px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Route Observatory",
+    "overview": "RiseVPN looks and behaves like a calibrated network instrument: dark, exact, and visibly built to measure before it acts. Graphite recesses, steel panels, etched dividers, gridded readouts, and clipped corners make the infrastructure tangible without drifting into decorative “cybersecurity” neon.\n\nThe public surface uses this world in Persuade mode, with oversized compressed headlines and the route instrument as product proof. Cabinet and administration surfaces shift into Operate mode: denser grids, quieter hierarchy, and status-first panels retain the same material and signal language. The system is Russian-first and treats live state, limits, and warnings as evidence rather than spectacle.",
+    "keyCharacteristics": [
+      "Instrument-like graphite and steel surfaces with fine structural lines.",
+      "Condensed, uppercase display type paired with calm, readable body copy.",
+      "Cobalt marks selection and action; green marks verified state; amber and red carry operational meaning.",
+      "Clipped industrial corners, layered bezels, measurement grids, screws, scales, and tabular readouts.",
+      "Expressive Persuade layouts and compact Operate layouts share one token vocabulary.",
+      "Responsive reflow, visible keyboard focus, reduced-motion support, and no horizontal overflow are baseline behavior."
+    ],
+    "rules": [
+      {"name": "The Signal Discipline Rule", "body": "Cobalt means action or selection, green means verified health, amber means attention, and red means fault; never use these colors as interchangeable decoration.", "section": "colors"},
+      {"name": "The Dark Instrument Rule", "body": "New surfaces begin with graphite and steel layering. Do not introduce light cards, pastel fills, or unrelated accent hues.", "section": "colors"},
+      {"name": "The Readout Rule", "body": "Use condensed type for commands, measurements, and hierarchy; use Manrope for sentences users must understand.", "section": "typography"},
+      {"name": "The Uppercase Boundary Rule", "body": "Uppercase belongs to display headings and instrument labels, not paragraphs, form help, warnings, or FAQ answers.", "section": "typography"},
+      {"name": "The Wide-to-Stack Rule", "body": "Preserve hierarchy as columns collapse: headline before evidence, state before explanation, and primary action before secondary metadata.", "section": "layout"},
+      {"name": "The Cabinet Density Rule", "body": "Operate surfaces use 20px gaps and line-separated rows; do not import the landing page’s oversized whitespace into routine administration.", "section": "layout"},
+      {"name": "The Structural Depth Rule", "body": "Use borders, recesses, texture, and nested frames before shadows; reserve obvious elevation for the route instrument and primary action.", "section": "elevation"},
+      {"name": "The Cut-Corner Rule", "body": "Reuse the established diagonal cut for actionable controls and framed panels; do not substitute soft pill shapes or arbitrary radius scales.", "section": "shapes"}
+    ],
+    "dos": [
+      "Do make real network state, route selection, quota, and operational status the visual evidence.",
+      "Do use cobalt sparingly for selection and action, and pair every semantic status color with readable text or an icon.",
+      "Do preserve the shared graphite/steel chassis, clipped corners, one-pixel rules, and condensed readout typography across Persuade and Operate surfaces.",
+      "Do recompose at 1100px and 760px, keep focus visible, honor reduced motion, and verify there is no horizontal overflow.",
+      "Do localize Russian labels, dates, bytes, speeds, durations, and ruble values consistently."
+    ],
+    "donts": [
+      "Don't turn the system into generic neon cyberpunk, glassmorphism, or a collection of floating rounded cards.",
+      "Don't use green, amber, or red decoratively or allow status to depend on color alone.",
+      "Don't add manual location selectors: every plan uses automatic location selection.",
+      "Don't compress the route instrument until its measurements become illegible; remove secondary detail at narrow widths.",
+      "Don't fabricate performance, network, legal, adoption, or uptime claims to fill a composition."
+    ]
+  }
+}

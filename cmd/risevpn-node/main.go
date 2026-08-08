@@ -122,7 +122,7 @@ func serve(args []string) error {
 	}
 	collector := usage.New(database, cfg.TrafficStatsURL, cfg.TrafficStatsSecret)
 	go collector.Run(ctx)
-	go control.New(database, complianceService, effectiveVersion(cfg)).Run(ctx)
+	go control.New(database, complianceService, effectiveVersion(cfg), collector).Run(ctx)
 	go complianceLoop(ctx, complianceService)
 	slog.Info("RiseVPN node agent started", "version", effectiveVersion(cfg), "internal", cfg.InternalListen)
 	<-ctx.Done()

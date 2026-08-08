@@ -1,0 +1,7 @@
+{
+  "id": "route-observatory",
+  "label": "Маршрутный прибор",
+  "promptFile": "route-observatory.prompt.txt",
+  "approved": true,
+  "warning": "Generated lower-fold prices and network readings are not product facts and must not be implemented."
+}

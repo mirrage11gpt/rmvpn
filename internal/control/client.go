@@ -15,28 +15,40 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
 	"github.com/mirrage11gpt/rmvpn/internal/compliance"
 	"github.com/mirrage11gpt/rmvpn/internal/model"
 	"github.com/mirrage11gpt/rmvpn/internal/security"
 	"github.com/mirrage11gpt/rmvpn/internal/store"
+	protocol "github.com/mirrage11gpt/rmvpn/protocol/v2"
 )
 
 type Client struct {
 	store      *store.Store
 	compliance *compliance.Service
 	version    string
+	seenMu     sync.Mutex
+	seen       map[string]struct{}
+	kicker     interface {
+		Kick(context.Context, string) error
+	}
 }
 
-type envelope struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
-}
+// envelope remains an alias for protocol-v1 tests and source compatibility.
+type envelope = protocol.Envelope
 
-func New(s *store.Store, complianceService *compliance.Service, version string) *Client {
-	return &Client{store: s, compliance: complianceService, version: version}
+func New(s *store.Store, complianceService *compliance.Service, version string, kickers ...interface {
+	Kick(context.Context, string) error
+}) *Client {
+	c := &Client{store: s, compliance: complianceService, version: version, seen: make(map[string]struct{})}
+	if len(kickers) > 0 {
+		c.kicker = kickers[0]
+	}
+	return c
 }
 
 func (c *Client) Run(ctx context.Context) {
@@ -83,7 +95,7 @@ func (c *Client) connect(ctx context.Context) error {
 	defer connection.CloseNow()
 	connection.SetReadLimit(4 << 20)
 	nodeID, _, _ := c.store.State(ctx, "node_id")
-	if err := write(ctx, connection, "hello", map[string]any{"version": 1, "nodeId": nodeID, "agentVersion": c.version}); err != nil {
+	if err := write(ctx, connection, "hello", protocol.Hello{NodeID: nodeID, AgentVersion: c.version, Protocols: []int{1, 2}, Capabilities: []protocol.Capability{protocol.CapabilityACK, protocol.CapabilityQuotaLease, protocol.CapabilitySessionKick, protocol.CapabilityPolicyOverride, protocol.CapabilityCertRotate, protocol.CapabilityAtomicUpdate}}); err != nil {
 		return err
 	}
 
@@ -114,7 +126,11 @@ func (c *Client) connect(ctx context.Context) error {
 				return err
 			}
 			if len(usageEvents) > 0 {
-				if err := write(ctx, connection, "usage.batch", map[string]any{"events": usageEvents}); err != nil {
+				converted := make([]protocol.UsageEvent, 0, len(usageEvents))
+				for _, event := range usageEvents {
+					converted = append(converted, protocol.UsageEvent{EventID: strconv.FormatInt(event.ID, 10), DeviceID: event.DeviceID, RXBytes: event.RXBytes, TXBytes: event.TXBytes, StartedAt: event.RecordedAt, EndedAt: event.RecordedAt})
+				}
+				if err := write(ctx, connection, "usage.batch", map[string]any{"events": converted}); err != nil {
 					return err
 				}
 			}
@@ -161,20 +177,33 @@ func (c *Client) readLoop(ctx context.Context, connection *websocket.Conn) error
 		if messageType != websocket.MessageText {
 			continue
 		}
-		var message envelope
+		var message protocol.Envelope
 		if err := json.Unmarshal(payload, &message); err != nil {
 			return err
 		}
+		if message.MessageID != "" && c.wasSeen(message.MessageID) {
+			_ = writeReply(ctx, connection, "ack", message.MessageID, protocol.Ack{OK: true, Code: "duplicate", AppliedAt: time.Now().UTC().Format(time.RFC3339)})
+			continue
+		}
 		if err := c.handle(ctx, message); err != nil {
 			slog.Warn("control message rejected", "type", message.Type, "error", err)
-			_ = write(ctx, connection, "error", map[string]string{"requestType": message.Type, "message": err.Error()})
+			if message.MessageID != "" {
+				_ = writeReply(ctx, connection, "nack", message.MessageID, protocol.Ack{OK: false, Code: "apply-failed", Message: err.Error()})
+			} else {
+				_ = write(ctx, connection, "error", map[string]string{"requestType": message.Type, "message": err.Error()})
+			}
+			continue
+		}
+		if message.MessageID != "" {
+			c.markSeen(message.MessageID)
+			_ = writeReply(ctx, connection, "ack", message.MessageID, protocol.Ack{OK: true, AppliedAt: time.Now().UTC().Format(time.RFC3339)})
 		}
 	}
 }
 
-func (c *Client) handle(ctx context.Context, message envelope) error {
+func (c *Client) handle(ctx context.Context, message protocol.Envelope) error {
 	switch message.Type {
-	case "device.upsert", "quota.lease":
+	case "device.upsert":
 		var payload struct {
 			DeviceID         string     `json:"deviceId"`
 			CredentialHash   string     `json:"credentialHash"`
@@ -195,10 +224,45 @@ func (c *Client) handle(ctx context.Context, message envelope) error {
 		if _, ok := payload.Plan.Policy(); !ok {
 			return errors.New("unknown plan")
 		}
-		return c.store.UpsertDevice(ctx, model.Device{ID: payload.DeviceID, CredentialHash: payload.CredentialHash,
+		previous, found, _ := c.store.DeviceByID(ctx, payload.DeviceID)
+		err := c.store.UpsertDevice(ctx, model.Device{ID: payload.DeviceID, CredentialHash: payload.CredentialHash,
 			Plan: payload.Plan, Active: payload.Active, SubscriptionEnds: payload.SubscriptionEnds,
 			PeriodEnds: payload.PeriodEnds, QuotaBytes: payload.QuotaBytes,
 			LeaseBytes: payload.LeaseBytes, LeaseExpires: payload.LeaseExpires})
+		if err == nil && found && previous.CredentialHash != payload.CredentialHash && c.kicker != nil {
+			_ = c.kicker.Kick(ctx, payload.DeviceID)
+		}
+		return err
+	case "quota.lease":
+		var lease protocol.QuotaLease
+		if err := json.Unmarshal(message.Data, &lease); err != nil {
+			return err
+		}
+		keyEncoded, ok, err := c.store.State(ctx, "quota_public_key")
+		if err != nil || !ok {
+			keyEncoded, ok, err = c.store.State(ctx, "controller_public_key")
+		}
+		if err != nil || !ok {
+			return errors.New("quota verification key is missing")
+		}
+		keyRaw, err := security.Decode(keyEncoded)
+		if err != nil || len(keyRaw) != ed25519.PublicKeySize {
+			return errors.New("invalid quota verification key")
+		}
+		if err := lease.Verify(ed25519.PublicKey(keyRaw), time.Now().UTC()); err != nil {
+			return err
+		}
+		nodeID, _, _ := c.store.State(ctx, "node_id")
+		if lease.NodeID != nodeID {
+			return errors.New("quota lease belongs to another node")
+		}
+		device, found, err := c.store.DeviceByID(ctx, lease.DeviceID)
+		if err != nil || !found {
+			return errors.New("quota lease device is missing")
+		}
+		device.LeaseBytes = lease.Bytes
+		device.LeaseExpires = lease.ExpiresAt
+		return c.store.UpsertDevice(ctx, device)
 	case "device.revoke":
 		var payload struct {
 			DeviceID string `json:"deviceId"`
@@ -206,20 +270,50 @@ func (c *Client) handle(ctx context.Context, message envelope) error {
 		if err := json.Unmarshal(message.Data, &payload); err != nil {
 			return err
 		}
-		return c.store.RevokeDevice(ctx, payload.DeviceID)
+		if err := c.store.RevokeDevice(ctx, payload.DeviceID); err != nil {
+			return err
+		}
+		if c.kicker != nil {
+			return c.kicker.Kick(ctx, payload.DeviceID)
+		}
+		return nil
+	case "session.kick":
+		var payload protocol.DeviceRef
+		if err := json.Unmarshal(message.Data, &payload); err != nil {
+			return err
+		}
+		if payload.DeviceID == "" {
+			return errors.New("deviceId is required")
+		}
+		if c.kicker == nil {
+			return errors.New("traffic API kicker is unavailable")
+		}
+		return c.kicker.Kick(ctx, payload.DeviceID)
+	case "policy.override":
+		var payload protocol.PolicyOverride
+		if err := json.Unmarshal(message.Data, &payload); err != nil {
+			return err
+		}
+		if payload.DeviceID == "" || !payload.ExpiresAt.After(time.Now()) {
+			return errors.New("invalid policy override")
+		}
+		return c.store.ApplyPolicyOverride(ctx, payload.DeviceID, payload.UpBPS, payload.DownBPS, payload.P2P, payload.ExpiresAt)
 	case "compliance.feed":
 		var feed compliance.SignedFeed
 		if err := json.Unmarshal(message.Data, &feed); err != nil {
 			return err
 		}
-		controllerKey, ok, err := c.store.State(ctx, "controller_public_key")
+		controllerKey, ok, err := c.store.State(ctx, "compliance_public_key")
+		if err != nil || !ok {
+			controllerKey, ok, err = c.store.State(ctx, "controller_public_key")
+		}
 		if err != nil || !ok {
 			return errors.New("controller public key is missing")
 		}
 		return c.compliance.Apply(ctx, feed, controllerKey)
 	case "usage.ack":
 		var payload struct {
-			EventIDs []int64 `json:"eventIds"`
+			EventIDs []json.RawMessage `json:"eventIds"`
 		}
 		if err := json.Unmarshal(message.Data, &payload); err != nil {
 			return err
@@ -227,7 +321,54 @@ func (c *Client) handle(ctx context.Context, message envelope) error {
 		if len(payload.EventIDs) > 5000 {
 			return errors.New("too many usage event IDs")
 		}
-		return c.store.MarkUsageSent(ctx, payload.EventIDs, time.Now().UTC())
+		ids := make([]int64, 0, len(payload.EventIDs))
+		for _, raw := range payload.EventIDs {
+			var text string
+			if json.Unmarshal(raw, &text) == nil {
+				if id, err := strconv.ParseInt(text, 10, 64); err == nil {
+					ids = append(ids, id)
+				}
+				continue
+			}
+			var id int64
+			if json.Unmarshal(raw, &id) == nil {
+				ids = append(ids, id)
+			}
+		}
+		return c.store.MarkUsageSent(ctx, ids, time.Now().UTC())
+	case "certificate.rotate":
+		var rotation protocol.CertificateRotate
+		if err := json.Unmarshal(message.Data, &rotation); err != nil {
+			return err
+		}
+		block, _ := pem.Decode([]byte(rotation.CertificatePEM))
+		if block == nil {
+			return errors.New("certificate PEM is invalid")
+		}
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return err
+		}
+		publicEncoded, ok, err := c.store.State(ctx, "node_public_key")
+		if err != nil || !ok {
+			return errors.New("node public key is missing")
+		}
+		publicRaw, err := security.Decode(publicEncoded)
+		if err != nil {
+			return err
+		}
+		certPublic, ok := certificate.PublicKey.(ed25519.PublicKey)
+		if !ok || !certPublic.Equal(ed25519.PublicKey(publicRaw)) {
+			return errors.New("rotated certificate does not match node identity")
+		}
+		if !certificate.NotAfter.After(time.Now().Add(7 * 24 * time.Hour)) {
+			return errors.New("rotated certificate validity is too short")
+		}
+		states := map[string]string{"node_certificate": rotation.CertificatePEM}
+		if rotation.ControllerCA != "" {
+			states["controller_ca"] = rotation.ControllerCA
+		}
+		return c.store.SetStates(ctx, states)
 	case "drain", "update":
 		return fmt.Errorf("%s is acknowledged but requires the privileged updater helper", message.Type)
 	default:
@@ -260,7 +401,10 @@ func (c *Client) tlsConfig(ctx context.Context) (*tls.Config, error) {
 	if err != nil || !ok {
 		return nil, errors.New("controller CA is missing")
 	}
-	roots := x509.NewCertPool()
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
 	if !roots.AppendCertsFromPEM([]byte(controllerCA)) {
 		return nil, errors.New("invalid controller CA")
 	}
@@ -268,14 +412,43 @@ func (c *Client) tlsConfig(ctx context.Context) (*tls.Config, error) {
 }
 
 func write(ctx context.Context, connection *websocket.Conn, messageType string, data any) error {
-	payload, err := json.Marshal(struct {
-		Type string `json:"type"`
-		Data any    `json:"data,omitempty"`
-	}{messageType, data})
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(protocol.Envelope{Version: protocol.Version, MessageID: uuid.NewString(), Type: messageType, SentAt: time.Now().UTC(), Data: rawData})
 	if err != nil {
 		return err
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	return connection.Write(writeCtx, websocket.MessageText, payload)
+}
+
+func writeReply(ctx context.Context, connection *websocket.Conn, messageType, replyTo string, data any) error {
+	rawData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(protocol.Envelope{Version: protocol.Version, MessageID: uuid.NewString(), ReplyTo: replyTo, Type: messageType, SentAt: time.Now().UTC(), Data: rawData})
+	if err != nil {
+		return err
+	}
+	writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return connection.Write(writeCtx, websocket.MessageText, payload)
+}
+func (c *Client) wasSeen(id string) bool {
+	c.seenMu.Lock()
+	defer c.seenMu.Unlock()
+	_, ok := c.seen[id]
+	return ok
+}
+func (c *Client) markSeen(id string) {
+	c.seenMu.Lock()
+	defer c.seenMu.Unlock()
+	if len(c.seen) > 2048 {
+		c.seen = make(map[string]struct{})
+	}
+	c.seen[id] = struct{}{}
 }

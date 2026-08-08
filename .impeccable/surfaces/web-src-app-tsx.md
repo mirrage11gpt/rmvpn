@@ -1,0 +1,33 @@
+---
+version: 1
+slug: "web-src-app-tsx"
+primary_target: "web/src/App.tsx"
+related_targets: []
+---
+
+# Лендинг RiseVPN
+
+- Scope: публичный лендинг; mode: Persuade.
+- Audience/job: русскоязычный посетитель должен быстро понять тарифы, автовыбор и ограничения, затем начать Trial через Telegram.
+- Primary action: «Начать Trial». Proof: живая сеть реальных узлов, прозрачные параметры тарифов, проверяемое состояние автоподбора.
+- Constraints: только подтверждённые факты; без отзывов и вымышленных метрик; WCAG 2.2 AA; responsive; reduced motion.
+- Chosen direction: «Точная сеть» в тёмной теме — современная цифровая метрология, графитовые приборные поля, кобальтовый сигнал, зелёная поверка и красный только для тревог.
+- Memorable moment: несколько измеряемых маршрутов сходятся к одному подтверждённому узлу; интерфейс объясняет, почему пользователю не нужен список локаций.
+- Rejected default: неоновый глобус, щит, замок и универсальные SaaS-карточки.
+- Approved composition: `.impeccable/mocks/route-observatory.png` — «Маршрутный прибор».
+- Composition contract: текст занимает левую треть; единый измерительный модуль занимает правые две трети; несколько маршрутов сходятся к одному подтверждённому узлу; ниже проходит живая лента сети и начинается тарифный раздел.
+- Do not literalize: синтетические цены, страны, задержки и прочие числа из изображения; декоративные винты не должны становиться интерактивными элементами; подтверждающая печать означает проверку маршрута системой, а не государственную сертификацию.
+
+## Implementation inventory
+
+| Ingredient | Commitment | Medium |
+| --- | --- | --- |
+| Header rail | Тонкая гравированная планка, компактная навигация | Semantic HTML/CSS |
+| Hero type | Сжатый индустриальный display, примерно 3:1 к обычному тексту | Webfont/CSS |
+| Route instrument | Пять трасс, шкалы, один подтверждённый узел, живые состояния | Authored SVG + CSS motion |
+| Panel material | Тёмный анодированный металл с различимой мелкой фактурой | Generated raster texture + CSS |
+| Verification plate | Гравированная зелёная подпись, clipped corners | HTML/CSS + SVG icon |
+| Primary action | Кобальтовая силовая пластина с физичным нажатием | Semantic button/CSS |
+| Network rail | Реальные healthy/stale/draining состояния без фиктивных чисел | HTML backed by API |
+| Remaining sections | Та же шкала, углы, линии и материал без bento-сетки | Semantic HTML/CSS |
+| Mobile | Прибор превращается в вертикальную трассу под заголовком | Responsive SVG/CSS |
