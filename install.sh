@@ -30,7 +30,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || { echo "run as root" >&2; exit 1; }
-[ -n "$DOMAIN" ] && [ -n "$ACME_EMAIL" ] && [ -n "$MASQUERADE_URL" ] || usage
+if [ -z "$DOMAIN" ] || [ -z "$ACME_EMAIL" ] || [ -z "$MASQUERADE_URL" ]; then
+  usage
+fi
 case "$DOMAIN" in *[!A-Za-z0-9.-]*|.*|*..*|*.) echo "invalid domain" >&2; exit 1 ;; esac
 case "$ACME_EMAIL" in *@*.*) ;; *) echo "invalid ACME email" >&2; exit 1 ;; esac
 case "$MASQUERADE_URL" in
@@ -41,10 +43,10 @@ case "$MASQUERADE_URL" in *[\"\'\`\$\\\|\;\<\>\{\}]*|*' '*) echo "masquerade URL
 
 # shellcheck disable=SC1091
 . /etc/os-release
-[ "${ID:-}" = ubuntu ] && [ "${VERSION_ID:-}" = 26.04 ] || {
+if [ "${ID:-}" != ubuntu ] || [ "${VERSION_ID:-}" != 26.04 ]; then
   echo "RiseVPN Node supports Ubuntu 26.04 only (found ${PRETTY_NAME:-unknown})" >&2
   exit 1
-}
+fi
 
 case "$(uname -m)" in
   x86_64) ARCH=amd64 ;;
