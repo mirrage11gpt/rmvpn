@@ -122,7 +122,7 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain node-msk-1.example.com \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.2.2
+  --version 0.2.3
 ```
 
 Установщик проверяет ОС, архитектуру, DNS, origin, занятые порты, minisign и
@@ -138,7 +138,7 @@ risevpn-node doctor
 risevpn-node logs -f
 risevpn-node enrollment show
 risevpn-node reenroll
-risevpn-node update --version 0.2.2
+risevpn-node update --version 0.2.3
 risevpn-node uninstall
 risevpn-node uninstall --purge-data
 ```

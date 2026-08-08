@@ -55,6 +55,38 @@ func TestSignedFeedAndMatching(t *testing.T) {
 	}
 }
 
+func TestSignedFeedSurvivesJSONBNormalization(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	feed := SignedFeed{
+		Version:   "jsonb-order",
+		UpdatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+		Rules:     json.RawMessage(`{"blockedPorts":[25],"blockedDomains":["blocked.example"],"blockedCidrs":[]}`),
+	}
+	if err := Sign(&feed, privateKey); err != nil {
+		t.Fatal(err)
+	}
+
+	// PostgreSQL jsonb returns an equivalent object with normalized whitespace
+	// and potentially different key order.
+	feed.Rules = json.RawMessage(`{ "blockedCidrs": [], "blockedDomains": ["blocked.example"], "blockedPorts": [25] }`)
+	payload, err := signingPayload(feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := security.Decode(feed.Signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ed25519.Verify(publicKey, payload, signature) {
+		t.Fatal("signature did not survive equivalent JSON normalization")
+	}
+}
+
 func TestStaleFeedCreatesPersistentAlert(t *testing.T) {
 	database, err := store.Open(filepath.Join(t.TempDir(), "node.db"))
 	if err != nil {

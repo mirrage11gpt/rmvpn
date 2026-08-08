@@ -163,12 +163,23 @@ func (s *Service) Blocked(ctx context.Context, address string) (bool, error) {
 }
 
 func signingPayload(feed SignedFeed) ([]byte, error) {
+	// Commands are stored as PostgreSQL jsonb before delivery. jsonb may reorder
+	// object keys and normalize whitespace, so sign the semantic JSON rather than
+	// the original byte representation.
+	var rules any
+	if err := json.Unmarshal(feed.Rules, &rules); err != nil {
+		return nil, fmt.Errorf("canonicalize compliance rules: %w", err)
+	}
+	canonicalRules, err := json.Marshal(rules)
+	if err != nil {
+		return nil, fmt.Errorf("canonicalize compliance rules: %w", err)
+	}
 	return json.Marshal(struct {
 		Version   string          `json:"version"`
 		UpdatedAt time.Time       `json:"updatedAt"`
 		ExpiresAt time.Time       `json:"expiresAt"`
 		Rules     json.RawMessage `json:"rules"`
-	}{feed.Version, feed.UpdatedAt.UTC(), feed.ExpiresAt.UTC(), feed.Rules})
+	}{feed.Version, feed.UpdatedAt.UTC(), feed.ExpiresAt.UTC(), canonicalRules})
 }
 
 func Sign(feed *SignedFeed, privateKey ed25519.PrivateKey) error {
