@@ -208,12 +208,42 @@ func (a *App) readSession(r *http.Request) (session, error) {
 		return session{}, err
 	}
 	raw, err := a.redis.Get(r.Context(), a.sessionRedisKey(cookie.Value)).Bytes()
+	if err == nil {
+		var s session
+		if json.Unmarshal(raw, &s) == nil && time.Now().Before(s.ExpiresAt) {
+			return s, nil
+		}
+		_ = a.redis.Del(r.Context(), a.sessionRedisKey(cookie.Value)).Err()
+	} else if err != redis.Nil {
+		return session{}, err
+	}
+
+	// Redis is an acceleration layer. A valid, non-revoked PostgreSQL session
+	// remains the source of truth and can rebuild the cache after a Redis restart
+	// or eviction. MFA verification is intentionally not restored: an admin must
+	// confirm TOTP again after cache loss.
+	csrfCookie, err := r.Cookie("rvpn_csrf")
+	if err != nil || csrfCookie.Value == "" {
+		return session{}, errors.New("session cache missing and CSRF cookie unavailable")
+	}
+	var s session
+	err = a.db.QueryRow(r.Context(), `
+		SELECT auth.user_id::text, auth.expires_at,
+		       COALESCE((SELECT role FROM user_roles WHERE user_id=auth.user_id
+		                 ORDER BY CASE role WHEN 'owner' THEN 1 WHEN 'operator' THEN 2 WHEN 'support' THEN 3 ELSE 4 END LIMIT 1),'')
+		FROM auth_sessions auth
+		JOIN users u ON u.id=auth.user_id
+		WHERE auth.token_hash=$1 AND auth.revoked_at IS NULL AND auth.expires_at>now() AND u.status='active'`, Hash(cookie.Value)).Scan(&s.UserID, &s.ExpiresAt, &s.Role)
+	if err != nil {
+		return session{}, errors.New("session is expired, revoked or unknown")
+	}
+	s.CSRF = csrfCookie.Value
+	raw, err = json.Marshal(s)
 	if err != nil {
 		return session{}, err
 	}
-	var s session
-	if json.Unmarshal(raw, &s) != nil || time.Now().After(s.ExpiresAt) {
-		return session{}, errors.New("expired")
+	if err = a.redis.Set(r.Context(), a.sessionRedisKey(cookie.Value), raw, time.Until(s.ExpiresAt)).Err(); err != nil {
+		return session{}, err
 	}
 	return s, nil
 }
@@ -228,9 +258,13 @@ func (a *App) issueSession(r *http.Request, w http.ResponseWriter, userID, role 
 	if err = a.redis.Set(r.Context(), a.sessionRedisKey(token), raw, sessionTTL).Err(); err != nil {
 		return err
 	}
-	_, _ = a.db.Exec(r.Context(), `INSERT INTO auth_sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,NULLIF($3,'')::inet,$4,$5)`, userID, Hash(token), clientIP(r), r.UserAgent(), s.ExpiresAt)
-	http.SetCookie(w, &http.Cookie{Name: "rvpn_session", Value: token, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(a.config.PublicURL, "https://"), SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds())})
-	http.SetCookie(w, &http.Cookie{Name: "rvpn_csrf", Value: csrf, Path: "/", Secure: strings.HasPrefix(a.config.PublicURL, "https://"), SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL.Seconds())})
+	if _, err = a.db.Exec(r.Context(), `INSERT INTO auth_sessions(user_id,token_hash,ip,user_agent,expires_at) VALUES($1,$2,NULLIF($3,'')::inet,$4,$5)`, userID, Hash(token), clientIP(r), r.UserAgent(), s.ExpiresAt); err != nil {
+		_ = a.redis.Del(r.Context(), a.sessionRedisKey(token)).Err()
+		return err
+	}
+	secure := strings.HasPrefix(a.config.PublicURL, "https://")
+	http.SetCookie(w, &http.Cookie{Name: "rvpn_session", Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(sessionTTL.Seconds()), Expires: s.ExpiresAt})
+	http.SetCookie(w, &http.Cookie{Name: "rvpn_csrf", Value: csrf, Path: "/", Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: int(sessionTTL.Seconds()), Expires: s.ExpiresAt})
 	return nil
 }
 
