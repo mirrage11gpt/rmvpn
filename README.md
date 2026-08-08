@@ -37,12 +37,18 @@ go test -race ./...
 ключ вне репозитория:
 
 ```bash
-minisign -G -p risevpn-release.pub -s risevpn-release.key
+minisign -G -W -p risevpn-release.pub -s risevpn-release.key
 ```
 
 Содержимое private key добавляется в GitHub Actions secret
 `MINISIGN_PRIVATE_KEY`. Строка `RW...` из public key публикуется через доверенный
 канал и передаётся установщику. Private key нельзя коммитить.
+
+Текущий production public key:
+
+```text
+RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZvdN+aLyCc
+```
 
 Release workflow собирает оба агента, patched Hysteria, packaging archive,
 `checksums.txt` и `checksums.txt.minisig`.
@@ -59,7 +65,7 @@ Release workflow собирает оба агента, patched Hysteria, packagi
 Рекомендуется сначала скачать установщик по TLS и просмотреть его, затем:
 
 ```bash
-sudo RISEVPN_RELEASE_PUBLIC_KEY='RW...' ./install.sh \
+sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZvdN+aLyCc' ./install.sh \
   --domain node-msk-1.example.com \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
@@ -128,4 +134,3 @@ alert. Это техническое поведение не является п
 
 Форматы enrollment и control-channel описаны в
 [`docs/control-protocol.md`](docs/control-protocol.md).
-

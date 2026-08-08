@@ -55,13 +55,14 @@ jobs:
         run: |
           tar -C packaging -czf dist/risevpn-node-packaging.tar.gz .
           cp install.sh dist/install.sh
+          cp release/risevpn-release.pub dist/risevpn-release.pub
       - name: Sign release manifest
         env:
           MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
         run: |
           sudo apt-get update && sudo apt-get install -y minisign
           cd dist
-          sha256sum risevpn-node-linux-* hysteria-risevpn-linux-* risevpn-node-packaging.tar.gz install.sh > checksums.txt
+          sha256sum risevpn-node-linux-* hysteria-risevpn-linux-* risevpn-node-packaging.tar.gz install.sh risevpn-release.pub > checksums.txt
           printf '%s\n' "$MINISIGN_PRIVATE_KEY" > /tmp/risevpn-minisign.key
           minisign -S -s /tmp/risevpn-minisign.key -m checksums.txt -x checksums.txt.minisig
       - uses: softprops/action-gh-release@v3
