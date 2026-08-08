@@ -39,7 +39,7 @@ services:
       HWID_HMAC_KEY: ${HWID_HMAC_KEY}
       QUOTA_ED25519_PRIVATE_KEY: ${QUOTA_ED25519_PRIVATE_KEY}
       COMPLIANCE_ED25519_PRIVATE_KEY: ${COMPLIANCE_ED25519_PRIVATE_KEY}
-      NODE_CA_CERT_FILE: /run/secrets/node_ca.pem
+      NODE_CA_CERT_FILE: /tmp/node-ca.pem
       NODE_CA_KEY_FILE: /tmp/node-ca.key
     secrets: [node_ca.pem, node_ca_key_encrypted, node_ca_key_password]
     expose: ["8080"]

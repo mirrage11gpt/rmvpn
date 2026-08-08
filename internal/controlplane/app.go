@@ -64,7 +64,10 @@ func NewApp(ctx context.Context, config Config, assets fs.FS) (*App, error) {
 		return nil, err
 	}
 	a := &App{config: config, db: db, redis: cache, vault: vault, assets: assets}
-	a.issuer, _ = LoadNodeIssuer(config.NodeCACertFile, config.NodeCAKeyFile)
+	a.issuer, err = LoadNodeIssuer(config.NodeCACertFile, config.NodeCAKeyFile)
+	if err != nil {
+		slog.Error("node certificate issuer unavailable", "error", err)
+	}
 	a.hub = NewNodeHub(db)
 	if !config.DevAuth {
 		oidcContext := oidc.ClientContext(ctx, telegramOIDCHTTPClient())
