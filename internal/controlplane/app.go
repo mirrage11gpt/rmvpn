@@ -67,11 +67,12 @@ func NewApp(ctx context.Context, config Config, assets fs.FS) (*App, error) {
 	a.issuer, _ = LoadNodeIssuer(config.NodeCACertFile, config.NodeCAKeyFile)
 	a.hub = NewNodeHub(db)
 	if !config.DevAuth {
-		provider, err := oidc.NewProvider(ctx, config.TelegramIssuer)
+		oidcContext := oidc.ClientContext(ctx, telegramOIDCHTTPClient())
+		provider, err := oidc.NewProvider(oidcContext, config.TelegramIssuer)
 		if err != nil {
 			return nil, fmt.Errorf("telegram oidc discovery: %w", err)
 		}
-		a.verifier = provider.Verifier(&oidc.Config{ClientID: config.TelegramClientID})
+		a.verifier = provider.Verifier(&oidc.Config{ClientID: config.TelegramClientID, SupportedSigningAlgs: []string{"RS256"}})
 		a.oauth = &oauth2.Config{ClientID: config.TelegramClientID, ClientSecret: config.TelegramSecret, Endpoint: provider.Endpoint(), RedirectURL: strings.TrimRight(config.PublicURL, "/") + "/auth/telegram/callback", Scopes: []string{oidc.ScopeOpenID, "profile", "telegram:bot_access"}}
 	}
 	if config.DevAuth {
