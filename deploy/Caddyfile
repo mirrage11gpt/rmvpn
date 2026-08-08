@@ -27,11 +27,13 @@
       trust_pool file /run/secrets/node_ca.pem
     }
   }
-  @node path /v2/nodes/connect
-  reverse_proxy @node control:8080 {
-    flush_interval -1
-    header_up X-RiseVPN-mTLS verified
-    header_up X-RiseVPN-Client-Serial {tls_client_serial}
+  route {
+    @node path /v2/nodes/connect
+    reverse_proxy @node control:8080 {
+      flush_interval -1
+      header_up X-RiseVPN-mTLS verified
+      header_up X-RiseVPN-Client-Serial {tls_client_serial}
+    }
+    respond 404
   }
-  respond 404
 }
