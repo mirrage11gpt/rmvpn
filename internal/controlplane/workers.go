@@ -213,24 +213,35 @@ func parseDomains(reader io.Reader) ([]string, error) {
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	seen := map[string]struct{}{}
 	domains := make([]string, 0, 10000)
+	invalid := 0
+	total := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(strings.ToLower(scanner.Text()))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		total++
 		if strings.ContainsAny(line, " /:@\t") || len(line) > 253 {
-			return nil, fmt.Errorf("invalid domain line")
+			invalid++
+			continue
 		}
 		ascii, err := idna.Lookup.ToASCII(strings.TrimSuffix(line, "."))
 		if err != nil || !strings.Contains(ascii, ".") {
-			return nil, fmt.Errorf("invalid domain %q", line)
+			invalid++
+			continue
 		}
 		if _, ok := seen[ascii]; !ok {
 			seen[ascii] = struct{}{}
 			domains = append(domains, ascii)
 		}
 	}
-	return domains, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(domains) == 0 || invalid > 1000 || (invalid > 5 && invalid*20 > total) {
+		return nil, fmt.Errorf("feed contains too many invalid domains: %d of %d", invalid, total)
+	}
+	return domains, nil
 }
 func (a *App) complianceFailure(ctx context.Context, cause error) error {
 	_, _ = a.db.Exec(ctx, `INSERT INTO alerts(key,severity,message) VALUES('COMPLIANCE_STALE','critical',$1) ON CONFLICT(key) DO UPDATE SET active=true,resolved_at=NULL,message=excluded.message`, "Compliance refresh failed; last-known-good remains active: "+cause.Error())
