@@ -238,7 +238,7 @@ func parseDomains(reader io.Reader) ([]string, error) {
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	if len(domains) == 0 || invalid > 1000 || (invalid > 5 && invalid*20 > total) {
+	if len(domains) == 0 || (invalid > 5 && invalid*20 > total) {
 		return nil, fmt.Errorf("feed contains too many invalid domains: %d of %d", invalid, total)
 	}
 	return domains, nil

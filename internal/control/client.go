@@ -93,7 +93,9 @@ func (c *Client) connect(ctx context.Context) error {
 		return err
 	}
 	defer connection.CloseNow()
-	connection.SetReadLimit(4 << 20)
+	// The production domain feed can contain more than a million entries.
+	// Keep the limit bounded, but large enough for a signed compliance command.
+	connection.SetReadLimit(64 << 20)
 	nodeID, _, _ := c.store.State(ctx, "node_id")
 	if err := write(ctx, connection, "hello", protocol.Hello{NodeID: nodeID, AgentVersion: c.version, Protocols: []int{1, 2}, Capabilities: []protocol.Capability{protocol.CapabilityACK, protocol.CapabilityQuotaLease, protocol.CapabilitySessionKick, protocol.CapabilityPolicyOverride, protocol.CapabilityCertRotate, protocol.CapabilityAtomicUpdate}}); err != nil {
 		return err
