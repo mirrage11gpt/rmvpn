@@ -104,11 +104,16 @@ func (a *App) Handler() http.Handler {
 		api.Group(func(private chi.Router) {
 			private.Use(a.requireSession)
 			private.Get("/me", a.me)
-			private.Get("/subscription", a.subscription)
-			private.Get("/devices", a.devices)
-			private.Post("/devices", a.createDevice)
-			private.Post("/devices/{id}/rebind", a.rebindDevice)
-			private.Post("/subscription/plan", a.changePlan)
+			private.Post("/me/accept-terms", a.acceptTerms)
+			private.Group(func(accepted chi.Router) {
+				accepted.Use(a.requireTerms)
+				accepted.Get("/subscription", a.subscription)
+				accepted.Get("/devices", a.devices)
+				accepted.Post("/devices", a.createDevice)
+				accepted.Post("/devices/{id}/subscription", a.deviceSubscription)
+				accepted.Post("/devices/{id}/rebind", a.rebindDevice)
+				accepted.Post("/subscription/plan", a.changePlan)
+			})
 			private.Get("/admin/mfa", a.adminMFAStatus)
 			private.Post("/admin/mfa/setup", a.adminMFASetup)
 			private.With(a.rateLimit("mfa", 10, 5*time.Minute)).Post("/admin/mfa/verify", a.adminMFAVerify)
@@ -392,12 +397,35 @@ func (a *App) me(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)
 	var name, username, status string
 	var balance int64
-	err := a.db.QueryRow(r.Context(), `SELECT u.display_name,COALESCE(u.username,''),u.status,w.balance_kopecks FROM users u JOIN wallets w ON w.user_id=u.id WHERE u.id=$1`, s.UserID).Scan(&name, &username, &status, &balance)
+	var termsAccepted bool
+	err := a.db.QueryRow(r.Context(), `SELECT u.display_name,COALESCE(u.username,''),u.status,w.balance_kopecks,u.terms_accepted_at IS NOT NULL FROM users u JOIN wallets w ON w.user_id=u.id WHERE u.id=$1`, s.UserID).Scan(&name, &username, &status, &balance, &termsAccepted)
 	if err != nil {
 		problem(w, 404, "user", "Пользователь не найден", "")
 		return
 	}
-	jsonResponse(w, 200, map[string]any{"id": s.UserID, "displayName": name, "username": username, "status": status, "balanceKopecks": balance, "role": s.Role, "csrfToken": s.CSRF})
+	jsonResponse(w, 200, map[string]any{"id": s.UserID, "displayName": name, "username": username, "status": status, "balanceKopecks": balance, "role": s.Role, "csrfToken": s.CSRF, "termsAccepted": termsAccepted})
+}
+
+const currentTermsVersion = "2026-08-09"
+
+func (a *App) acceptTerms(w http.ResponseWriter, r *http.Request) {
+	s := currentSession(r)
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET terms_accepted_at=COALESCE(terms_accepted_at,now()),terms_version=$1 WHERE id=$2`, currentTermsVersion, s.UserID); err != nil {
+		problem(w, 500, "terms", "Не удалось сохранить согласие", "Попробуйте ещё раз.")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *App) requireTerms(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var accepted bool
+		if err := a.db.QueryRow(r.Context(), `SELECT terms_accepted_at IS NOT NULL FROM users WHERE id=$1`, currentSession(r).UserID).Scan(&accepted); err != nil || !accepted {
+			problem(w, http.StatusPreconditionRequired, "terms-required", "Примите соглашение", "После этого откроются устройства и подписка.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)
@@ -458,8 +486,9 @@ func (a *App) createDevice(w http.ResponseWriter, r *http.Request) {
 	token, _ := RandomToken(32)
 	id := uuid.NewString()
 	ciphertext, _ := a.vault.Encrypt(credential, []byte(id))
+	tokenCiphertext, _ := a.vault.Encrypt(token, []byte("subscription:"+id))
 	var slot int
-	err = tx.QueryRow(r.Context(), `INSERT INTO devices(id,user_id,slot,name,credential_ciphertext,credential_hash,subscription_token_hash) SELECT $1,$2,COALESCE(max(slot),0)+1,$3,$4,$5,$6 FROM devices WHERE user_id=$2 RETURNING slot`, id, s.UserID, strings.TrimSpace(body.Name), ciphertext, Hash(credential), Hash(token)).Scan(&slot)
+	err = tx.QueryRow(r.Context(), `INSERT INTO devices(id,user_id,slot,name,credential_ciphertext,credential_hash,subscription_token_hash,subscription_token_ciphertext) SELECT $1,$2,COALESCE(max(slot),0)+1,$3,$4,$5,$6,$7 FROM devices WHERE user_id=$2 RETURNING slot`, id, s.UserID, strings.TrimSpace(body.Name), ciphertext, Hash(credential), Hash(token), tokenCiphertext).Scan(&slot)
 	if err == nil {
 		err = tx.Commit(r.Context())
 	}
@@ -468,6 +497,34 @@ func (a *App) createDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, 201, map[string]any{"id": id, "slot": slot, "name": body.Name, "subscriptionUrl": strings.TrimRight(a.config.PublicURL, "/") + "/s/" + token})
+}
+
+func (a *App) deviceSubscription(w http.ResponseWriter, r *http.Request) {
+	s := currentSession(r)
+	id := chi.URLParam(r, "id")
+	var encrypted []byte
+	if err := a.db.QueryRow(r.Context(), `SELECT subscription_token_ciphertext FROM devices WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL`, id, s.UserID).Scan(&encrypted); err != nil {
+		problem(w, 404, "device", "Устройство не найдено", "")
+		return
+	}
+	var token string
+	var err error
+	if len(encrypted) > 0 {
+		token, err = a.vault.Decrypt(encrypted, []byte("subscription:"+id))
+	} else {
+		token, err = RandomToken(32)
+		if err == nil {
+			encrypted, err = a.vault.Encrypt(token, []byte("subscription:"+id))
+		}
+		if err == nil {
+			_, err = a.db.Exec(r.Context(), `UPDATE devices SET subscription_token_hash=$1,subscription_token_ciphertext=$2 WHERE id=$3 AND user_id=$4`, Hash(token), encrypted, id, s.UserID)
+		}
+	}
+	if err != nil {
+		problem(w, 500, "subscription-token", "Не удалось получить ссылку", "Попробуйте ещё раз.")
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"subscriptionUrl": strings.TrimRight(a.config.PublicURL, "/") + "/s/" + token})
 }
 func (a *App) rebindDevice(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)
@@ -613,9 +670,14 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 	var cipher, storedHWID []byte
 	var plan, status string
 	var periodEnd *time.Time
-	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain)
+	var termsAccepted bool
+	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain,u.terms_accepted_at IS NOT NULL FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain, &termsAccepted)
 	if err != nil {
 		problem(w, 404, "subscription-token", "Ссылка подписки недействительна", "")
+		return
+	}
+	if !termsAccepted {
+		problem(w, http.StatusPreconditionRequired, "terms-required", "Сначала примите соглашение", "Откройте кабинет RiseVPN.")
 		return
 	}
 	fingerprint := a.vault.HWID(hwid)

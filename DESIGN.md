@@ -228,6 +228,28 @@ Borders are fine and low-contrast by default, becoming brighter only where a com
 
 Public navigation is centered, sparse, and secondary to the brand and login action. Cabinet navigation is a vertical 245px rail; active items use Raised Steel, brighter text, an icon, and the cut-corner silhouette. At mobile width it becomes a fixed bottom bar with icon-over-label items and hides the redundant brand/help chrome.
 
+The RiseVPN wordmark is always rendered as a single lockup: “Rise” in Instrument Ink and “VPN” in Signal Cobalt. Once a session is detected, the public header replaces “Войти” with “Кабинет”; it never shows both actions.
+
+### Customer language
+
+Public copy uses plain Russian and describes the action a customer takes: sign in, create a device, copy the subscription, and add it to v2RayTun. Internal protocol terms, quota implementation, provisioning, and compliance mechanics stay out of the marketing journey. Automatic location selection is explained only by the hero instrument and the dedicated cabinet panel.
+
+### Account consent
+
+The first authenticated visit is intercepted by a focused agreement gate. It has one checkbox, a visible link to the complete agreement, and one disabled-until-accepted action. Consent is persisted by the control server before device and subscription APIs become available.
+
+### Device manager
+
+The device page is a line-separated operational list rather than a card gallery. Every device has a clear state and a “Получить ссылку” action. The subscription URL remains visible in a read-only field after retrieval, so clipboard denial never strands the user. Subscription tokens are stored encrypted; legacy devices receive a new token on first retrieval.
+
+### Help chooser
+
+Help opens a dedicated three-option surface: FAQ for self-service, email for ordinary questions, and Telegram for paid priority support. Each option names the destination and consequence before navigation.
+
+### Public footer
+
+The footer contains the white/cobalt wordmark, operator name, INN, year, a restrained encryption statement, and one legal destination: the agreement. It does not repeat secondary navigation or internal compliance terminology.
+
 ### Route Instrument
 
 The signature proof component is a clipped steel enclosure with layered bezels, screws, vents, scales, a measurement grid, dashed candidate paths, one solid cobalt selected path, and a green verified endpoint. Its labels use condensed technical typography and tabular readings. On mobile, preserve the route story and verification result while removing secondary stability and result readouts that would crowd the display.
