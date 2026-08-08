@@ -1,0 +1,36 @@
+listen: :443
+
+tls:
+  cert: /etc/risevpn/tls/fullchain.pem
+  key: /etc/risevpn/tls/privkey.pem
+
+auth:
+  type: http
+  http:
+    url: http://127.0.0.1:9080/v1/auth
+    insecure: false
+
+trafficStats:
+  listen: 127.0.0.1:9999
+  secret: "@TRAFFIC_SECRET@"
+
+ignoreClientBandwidth: false
+disableUDP: false
+speedTest: false
+
+sniff:
+  enable: true
+  timeout: 2s
+  rewriteDomain: false
+
+masquerade:
+  type: proxy
+  proxy:
+    url: "@MASQUERADE_URL@"
+    rewriteHost: true
+    insecure: false
+    xForwarded: false
+  listenHTTP: :80
+  listenHTTPS: :443
+  forceHTTPS: true
+

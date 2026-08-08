@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build agent
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          GOOS=linux go build -trimpath -ldflags "-s -w -X main.version=$version" \
+            -o "dist/risevpn-node-linux-${GOARCH}" ./cmd/risevpn-node
+      - name: Build patched Hysteria
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          tag=$(head -n1 hysteria-patches/UPSTREAM_VERSION)
+          git clone --depth 1 --branch "$tag" https://github.com/apernet/hysteria.git /tmp/hysteria
+          for patch in hysteria-patches/*.patch; do git -C /tmp/hysteria apply "$GITHUB_WORKSPACE/$patch"; done
+          cd /tmp/hysteria/app
+          GOOS=linux go build -trimpath -ldflags "-s -w" -o "$GITHUB_WORKSPACE/dist/hysteria-risevpn-linux-${GOARCH}" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: dist
+      - name: Package service files
+        run: |
+          tar -C packaging -czf dist/risevpn-node-packaging.tar.gz .
+          cp install.sh dist/install.sh
+      - name: Sign release manifest
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          cd dist
+          sha256sum risevpn-node-linux-* hysteria-risevpn-linux-* risevpn-node-packaging.tar.gz install.sh > checksums.txt
+          printf '%s\n' "$MINISIGN_PRIVATE_KEY" > /tmp/risevpn-minisign.key
+          minisign -S -s /tmp/risevpn-minisign.key -m checksums.txt -x checksums.txt.minisig
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: dist/*

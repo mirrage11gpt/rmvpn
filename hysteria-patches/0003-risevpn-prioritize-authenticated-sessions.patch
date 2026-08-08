@@ -1,0 +1,185 @@
+From a4d8a5972a82c812acceb60c62afc9ac92ab56b0 Mon Sep 17 00:00:00 2001
+From: RiseVPN <dev@risevpn.local>
+Date: Sat, 8 Aug 2026 17:40:52 +0300
+Subject: [PATCH] risevpn: prioritize authenticated sessions under saturation
+
+---
+ core/server/config.go   |  6 ++++
+ core/server/priority.go | 66 +++++++++++++++++++++++++++++++++++++++++
+ core/server/server.go   | 19 ++++++++++--
+ 3 files changed, 89 insertions(+), 2 deletions(-)
+ create mode 100644 core/server/priority.go
+
+diff --git a/core/server/config.go b/core/server/config.go
+index e55ad26..40244cd 100644
+--- a/core/server/config.go
++++ b/core/server/config.go
+@@ -40,6 +40,7 @@ type Config struct {
+ 	EventLogger           EventLogger
+ 	TrafficLogger         TrafficLogger
+ 	MasqHandler           http.Handler
++	MaxConcurrentSessions int
+ }
+ 
+ // fill fills the fields that are not set by the user with default values when possible,
+@@ -110,6 +111,11 @@ func (c *Config) fill() error {
+ 	if c.Authenticator == nil {
+ 		return errors.ConfigError{Field: "Authenticator", Reason: "must be set"}
+ 	}
++	if c.MaxConcurrentSessions == 0 {
++		c.MaxConcurrentSessions = 4096
++	} else if c.MaxConcurrentSessions < 1 {
++		return errors.ConfigError{Field: "MaxConcurrentSessions", Reason: "must be positive"}
++	}
+ 	return nil
+ }
+ 
+diff --git a/core/server/priority.go b/core/server/priority.go
+new file mode 100644
+index 0000000..2a674c8
+--- /dev/null
++++ b/core/server/priority.go
+@@ -0,0 +1,66 @@
++package server
++
++import (
++	"context"
++	"sync"
++)
++
++// priorityGate caps authenticated sessions and wakes the highest-priority
++// waiter first when the node is saturated. Priorities are clamped to 0..3.
++type priorityGate struct {
++	mu       sync.Mutex
++	active   int
++	capacity int
++	waiters  [4][]chan struct{}
++}
++
++func newPriorityGate(capacity int) *priorityGate { return &priorityGate{capacity: capacity} }
++
++func (g *priorityGate) Acquire(ctx context.Context, priority uint8) error {
++	if priority > 3 {
++		priority = 3
++	}
++	g.mu.Lock()
++	if g.active < g.capacity {
++		g.active++
++		g.mu.Unlock()
++		return nil
++	}
++	waiter := make(chan struct{})
++	g.waiters[priority] = append(g.waiters[priority], waiter)
++	g.mu.Unlock()
++	select {
++	case <-waiter:
++		return nil
++	case <-ctx.Done():
++		g.mu.Lock()
++		queue := g.waiters[priority]
++		for i, queued := range queue {
++			if queued == waiter {
++				g.waiters[priority] = append(queue[:i], queue[i+1:]...)
++				g.mu.Unlock()
++				return ctx.Err()
++			}
++		}
++		// The waiter was granted while cancellation raced with Release.
++		g.mu.Unlock()
++		return nil
++	}
++}
++
++func (g *priorityGate) Release() {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	for priority := len(g.waiters) - 1; priority >= 0; priority-- {
++		if len(g.waiters[priority]) == 0 {
++			continue
++		}
++		waiter := g.waiters[priority][0]
++		g.waiters[priority] = g.waiters[priority][1:]
++		close(waiter)
++		return
++	}
++	if g.active > 0 {
++		g.active--
++	}
++}
+diff --git a/core/server/server.go b/core/server/server.go
+index dd76119..9915475 100644
+--- a/core/server/server.go
++++ b/core/server/server.go
+@@ -75,6 +75,7 @@ func NewServer(config *Config) (Server, error) {
+ 		config:   config,
+ 		tr:       tr,
+ 		listener: listener,
++		gate:     newPriorityGate(config.MaxConcurrentSessions),
+ 	}, nil
+ }
+ 
+@@ -82,6 +83,7 @@ type serverImpl struct {
+ 	config   *Config
+ 	tr       *quic.Transport
+ 	listener *quic.Listener
++	gate     *priorityGate
+ }
+ 
+ func (s *serverImpl) Serve() error {
+@@ -103,7 +105,7 @@ func (s *serverImpl) Close() error {
+ }
+ 
+ func (s *serverImpl) handleClient(conn *quic.Conn) {
+-	handler := newH3sHandler(s.config, conn)
++	handler := newH3sHandler(s.config, conn, s.gate)
+ 	h3s := http3.Server{
+ 		Handler:          handler,
+ 		StreamDispatcher: handler.ProxyStreamHijacker,
+@@ -111,6 +113,9 @@ func (s *serverImpl) handleClient(conn *quic.Conn) {
+ 	err := h3s.ServeQUICConn(conn)
+ 	// If the client is authenticated, we need to log the disconnect event
+ 	if handler.authenticated {
++		if handler.admissionHeld {
++			handler.gate.Release()
++		}
+ 		if tl := s.config.TrafficLogger; tl != nil {
+ 			tl.LogOnlineState(handler.authID, false)
+ 		}
+@@ -131,16 +136,19 @@ type h3sHandler struct {
+ 	policy        SessionPolicy
+ 	upLimiter     *rate.Limiter
+ 	downLimiter   *rate.Limiter
++	gate          *priorityGate
++	admissionHeld bool
+ 	connID        uint32 // a random id for dump streams
+ 
+ 	udpSM *udpSessionManager // Only set after authentication
+ }
+ 
+-func newH3sHandler(config *Config, conn *quic.Conn) *h3sHandler {
++func newH3sHandler(config *Config, conn *quic.Conn, gate *priorityGate) *h3sHandler {
+ 	return &h3sHandler{
+ 		config: config,
+ 		conn:   conn,
+ 		connID: rand.Uint32(),
++		gate:   gate,
+ 	}
+ }
+ 
+@@ -162,6 +170,13 @@ func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 		actualTx := authReq.Rx
+ 		ok, id, sessionPolicy := authenticateWithPolicy(h.config.Authenticator, h.conn.RemoteAddr(), authReq.Auth, actualTx)
+ 		if ok {
++			admissionContext, cancel := context.WithTimeout(r.Context(), 10*time.Second)
++			defer cancel()
++			if err := h.gate.Acquire(admissionContext, sessionPolicy.Priority); err != nil {
++				h.masqHandler(w, r)
++				return
++			}
++			h.admissionHeld = true
+ 			// Set authenticated flag
+ 			h.authenticated = true
+ 			h.authID = id
+-- 
+2.50.1 (Apple Git-155)
+

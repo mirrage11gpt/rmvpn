@@ -1,0 +1,192 @@
+From 0d03d01aed1b990116657d031b1450c2332c6d52 Mon Sep 17 00:00:00 2001
+From: RiseVPN <dev@risevpn.local>
+Date: Sat, 8 Aug 2026 17:34:17 +0300
+Subject: [PATCH] risevpn: authorize destinations through local policy backend
+
+---
+ core/server/config.go |  6 ++++++
+ core/server/copy.go   | 14 +++++++++-----
+ core/server/server.go | 17 ++++++++++++++++-
+ extras/auth/http.go   | 38 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 69 insertions(+), 6 deletions(-)
+
+diff --git a/core/server/config.go b/core/server/config.go
+index 7d62123..e55ad26 100644
+--- a/core/server/config.go
++++ b/core/server/config.go
+@@ -237,6 +237,12 @@ type PolicyAuthenticator interface {
+ 	AuthenticateWithPolicy(addr net.Addr, auth string, tx uint64) (ok bool, id string, policy SessionPolicy)
+ }
+ 
++// RequestAuthorizer optionally applies per-user destination policy after
++// authentication. The initial payload is ephemeral and must not be retained.
++type RequestAuthorizer interface {
++	AuthorizeRequest(id string, isUDP bool, reqAddr string, initialPayload []byte) error
++}
++
+ // EventLogger is an interface that provides logging logic.
+ type EventLogger interface {
+ 	Connect(addr net.Addr, id string, tx uint64)
+diff --git a/core/server/copy.go b/core/server/copy.go
+index b438ae7..08df10e 100644
+--- a/core/server/copy.go
++++ b/core/server/copy.go
+@@ -19,7 +19,11 @@ var copyBufPool = sync.Pool{
+ 	},
+ }
+ 
+-func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool, limiter *rate.Limiter) error {
++func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool) error {
++	return copyBufferLogLimited(dst, src, log, nil)
++}
++
++func copyBufferLogLimited(dst io.Writer, src io.Reader, log func(n uint64) bool, limiter *rate.Limiter) error {
+ 	bufp := copyBufPool.Get().(*[]byte)
+ 	buf := *bufp
+ 	defer copyBufPool.Put(bufp)
+@@ -54,14 +58,14 @@ func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool, limite
+ func copyTwoWayEx(id string, serverRw, remoteRw io.ReadWriter, l TrafficLogger, stats *StreamStats, up, down *rate.Limiter) error {
+ 	errChan := make(chan error, 2)
+ 	go func() {
+-		errChan <- copyBufferLog(serverRw, remoteRw, func(n uint64) bool {
++		errChan <- copyBufferLogLimited(serverRw, remoteRw, func(n uint64) bool {
+ 			stats.LastActiveTime.Store(time.Now())
+ 			stats.Rx.Add(n)
+ 			return l.LogTraffic(id, 0, n)
+ 		}, down)
+ 	}()
+ 	go func() {
+-		errChan <- copyBufferLog(remoteRw, serverRw, func(n uint64) bool {
++		errChan <- copyBufferLogLimited(remoteRw, serverRw, func(n uint64) bool {
+ 			stats.LastActiveTime.Store(time.Now())
+ 			stats.Tx.Add(n)
+ 			return l.LogTraffic(id, n, 0)
+@@ -89,7 +93,7 @@ func copyTwoWay(serverRw, remoteRw io.ReadWriter) error {
+ 
+ func copyTwoWayLimited(serverRw, remoteRw io.ReadWriter, up, down *rate.Limiter) error {
+ 	errChan := make(chan error, 2)
+-	go func() { errChan <- copyBufferLog(serverRw, remoteRw, func(uint64) bool { return true }, down) }()
+-	go func() { errChan <- copyBufferLog(remoteRw, serverRw, func(uint64) bool { return true }, up) }()
++	go func() { errChan <- copyBufferLogLimited(serverRw, remoteRw, func(uint64) bool { return true }, down) }()
++	go func() { errChan <- copyBufferLogLimited(remoteRw, serverRw, func(uint64) bool { return true }, up) }()
+ 	return <-errChan
+ }
+diff --git a/core/server/server.go b/core/server/server.go
+index 9ac4cc5..dd76119 100644
+--- a/core/server/server.go
++++ b/core/server/server.go
+@@ -214,7 +214,7 @@ func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 			if !h.config.DisableUDP {
+ 				go func() {
+ 					sm := newUDPSessionManager(
+-						&udpIOImpl{h.conn, id, h.config.TrafficLogger, h.config.RequestHook, h.config.Outbound, h.policy, h.upLimiter, h.downLimiter},
++						&udpIOImpl{h.conn, id, h.config.TrafficLogger, h.config.RequestHook, h.config.Outbound, h.config.Authenticator, h.policy, h.upLimiter, h.downLimiter},
+ 						&udpEventLoggerImpl{h.conn, id, h.config.EventLogger},
+ 						h.config.UDPIdleTimeout,
+ 					)
+@@ -305,6 +305,15 @@ func (h *h3sHandler) handleTCPRequest(stream *utils.QStream) {
+ 			streamStats.setHookedReqAddr(reqAddr)
+ 		}
+ 	}
++	if authorizer, ok := h.config.Authenticator.(RequestAuthorizer); ok {
++		if err := authorizer.AuthorizeRequest(h.authID, false, reqAddr, putback); err != nil {
++			if !hooked {
++				_ = protocol.WriteTCPResponse(stream, false, err.Error())
++			}
++			_ = stream.Close()
++			return
++		}
++	}
+ 	// Log the event
+ 	if h.config.EventLogger != nil {
+ 		h.config.EventLogger.TCPRequest(h.conn.RemoteAddr(), h.authID, reqAddr)
+@@ -369,6 +378,7 @@ type udpIOImpl struct {
+ 	TrafficLogger TrafficLogger
+ 	RequestHook   RequestHook
+ 	Outbound      Outbound
++	Authenticator Authenticator
+ 	Policy        SessionPolicy
+ 	UpLimiter     *rate.Limiter
+ 	DownLimiter   *rate.Limiter
+@@ -429,6 +439,11 @@ func (io *udpIOImpl) Hook(data []byte, reqAddr *string) error {
+ 	if !io.Policy.P2PAllowed && (isP2PAddress(*reqAddr) || isP2PPayload(data)) {
+ 		return errP2PBlocked
+ 	}
++	if authorizer, ok := io.Authenticator.(RequestAuthorizer); ok {
++		if err := authorizer.AuthorizeRequest(io.AuthID, true, *reqAddr, data); err != nil {
++			return err
++		}
++	}
+ 	if io.RequestHook != nil && io.RequestHook.Check(true, *reqAddr) {
+ 		return io.RequestHook.UDP(data, reqAddr)
+ 	} else {
+diff --git a/extras/auth/http.go b/extras/auth/http.go
+index 464905b..df3a7a9 100644
+--- a/extras/auth/http.go
++++ b/extras/auth/http.go
+@@ -8,6 +8,7 @@ import (
+ 	"io"
+ 	"net"
+ 	"net/http"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/apernet/hysteria/core/v2/server"
+@@ -20,6 +21,7 @@ const (
+ var _ server.Authenticator = &HTTPAuthenticator{}
+ 
+ var errInvalidStatusCode = errors.New("invalid status code")
++var errRequestDenied = errors.New("request denied by policy backend")
+ 
+ type HTTPAuthenticator struct {
+ 	Client *http.Client
+@@ -59,6 +61,17 @@ type httpSessionPolicy struct {
+ 	P2PAllowed bool   `json:"p2pAllowed"`
+ }
+ 
++type httpAuthorizeRequest struct {
++	ID             string `json:"id"`
++	UDP            bool   `json:"udp"`
++	Addr           string `json:"addr"`
++	InitialPayload []byte `json:"initialPayload,omitempty"`
++}
++
++type httpAuthorizeResponse struct {
++	OK bool `json:"ok"`
++}
++
+ func (a *HTTPAuthenticator) post(req *httpAuthRequest) (*httpAuthResponse, error) {
+ 	bs, err := json.Marshal(req)
+ 	if err != nil {
+@@ -113,3 +126,28 @@ func bitsToBytes(bits uint64) uint64 {
+ 	}
+ 	return (bits + 7) / 8
+ }
++
++func (a *HTTPAuthenticator) AuthorizeRequest(id string, isUDP bool, reqAddr string, initialPayload []byte) error {
++	request := &httpAuthorizeRequest{ID: id, UDP: isUDP, Addr: reqAddr, InitialPayload: initialPayload}
++	payload, err := json.Marshal(request)
++	if err != nil {
++		return err
++	}
++	authorizeURL := strings.TrimSuffix(a.URL, "/v1/auth") + "/v1/authorize"
++	resp, err := a.Client.Post(authorizeURL, "application/json", bytes.NewReader(payload))
++	if err != nil {
++		return err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode != http.StatusOK {
++		return errInvalidStatusCode
++	}
++	var result httpAuthorizeResponse
++	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
++		return err
++	}
++	if !result.OK {
++		return errRequestDenied
++	}
++	return nil
++}
+-- 
+2.50.1 (Apple Git-155)
+

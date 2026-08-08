@@ -1,0 +1,387 @@
+From f82d06d7b95787f62fe28e9df3773f652caf715c Mon Sep 17 00:00:00 2001
+From: RiseVPN <dev@risevpn.local>
+Date: Sat, 8 Aug 2026 17:27:59 +0300
+Subject: [PATCH] risevpn: add per-session auth policy enforcement
+
+---
+ core/server/config.go         | 16 +++++++++++
+ core/server/copy.go           | 23 ++++++++++++---
+ core/server/server.go         | 54 +++++++++++++++++++++++++++++++----
+ core/server/session_policy.go | 53 ++++++++++++++++++++++++++++++++++
+ extras/auth/http.go           | 33 ++++++++++++++++++---
+ 5 files changed, 165 insertions(+), 14 deletions(-)
+ create mode 100644 core/server/session_policy.go
+
+diff --git a/core/server/config.go b/core/server/config.go
+index 32c3ffd..7d62123 100644
+--- a/core/server/config.go
++++ b/core/server/config.go
+@@ -221,6 +221,22 @@ type Authenticator interface {
+ 	Authenticate(addr net.Addr, auth string, tx uint64) (ok bool, id string)
+ }
+ 
++// SessionPolicy contains optional per-authenticated-session controls. Values of
++// zero inherit the server-wide setting. This extension deliberately leaves the
++// Hysteria wire protocol unchanged.
++type SessionPolicy struct {
++	MaxTx      uint64 // server to client, bytes per second
++	MaxRx      uint64 // client to server, bytes per second
++	Priority   uint8
++	P2PAllowed bool
++}
++
++// PolicyAuthenticator is an optional extension implemented by authenticators
++// that can return a policy together with the normal auth decision.
++type PolicyAuthenticator interface {
++	AuthenticateWithPolicy(addr net.Addr, auth string, tx uint64) (ok bool, id string, policy SessionPolicy)
++}
++
+ // EventLogger is an interface that provides logging logic.
+ type EventLogger interface {
+ 	Connect(addr net.Addr, id string, tx uint64)
+diff --git a/core/server/copy.go b/core/server/copy.go
+index ea916d8..b438ae7 100644
+--- a/core/server/copy.go
++++ b/core/server/copy.go
+@@ -1,10 +1,13 @@
+ package server
+ 
+ import (
++	"context"
+ 	"errors"
+ 	"io"
+ 	"sync"
+ 	"time"
++
++	"golang.org/x/time/rate"
+ )
+ 
+ var errDisconnect = errors.New("traffic logger requested disconnect")
+@@ -16,7 +19,7 @@ var copyBufPool = sync.Pool{
+ 	},
+ }
+ 
+-func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool) error {
++func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool, limiter *rate.Limiter) error {
+ 	bufp := copyBufPool.Get().(*[]byte)
+ 	buf := *bufp
+ 	defer copyBufPool.Put(bufp)
+@@ -24,6 +27,11 @@ func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool) error
+ 	for {
+ 		nr, er := src.Read(buf)
+ 		if nr > 0 {
++			if limiter != nil {
++				if err := limiter.WaitN(context.Background(), nr); err != nil {
++					return err
++				}
++			}
+ 			if !log(uint64(nr)) {
+ 				// Log returns false, which means that the client should be disconnected
+ 				return errDisconnect
+@@ -43,21 +51,21 @@ func copyBufferLog(dst io.Writer, src io.Reader, log func(n uint64) bool) error
+ 	}
+ }
+ 
+-func copyTwoWayEx(id string, serverRw, remoteRw io.ReadWriter, l TrafficLogger, stats *StreamStats) error {
++func copyTwoWayEx(id string, serverRw, remoteRw io.ReadWriter, l TrafficLogger, stats *StreamStats, up, down *rate.Limiter) error {
+ 	errChan := make(chan error, 2)
+ 	go func() {
+ 		errChan <- copyBufferLog(serverRw, remoteRw, func(n uint64) bool {
+ 			stats.LastActiveTime.Store(time.Now())
+ 			stats.Rx.Add(n)
+ 			return l.LogTraffic(id, 0, n)
+-		})
++		}, down)
+ 	}()
+ 	go func() {
+ 		errChan <- copyBufferLog(remoteRw, serverRw, func(n uint64) bool {
+ 			stats.LastActiveTime.Store(time.Now())
+ 			stats.Tx.Add(n)
+ 			return l.LogTraffic(id, n, 0)
+-		})
++		}, up)
+ 	}()
+ 	// Block until one of the two goroutines returns
+ 	return <-errChan
+@@ -78,3 +86,10 @@ func copyTwoWay(serverRw, remoteRw io.ReadWriter) error {
+ 	// Block until one of the two goroutines returns
+ 	return <-errChan
+ }
++
++func copyTwoWayLimited(serverRw, remoteRw io.ReadWriter, up, down *rate.Limiter) error {
++	errChan := make(chan error, 2)
++	go func() { errChan <- copyBufferLog(serverRw, remoteRw, func(uint64) bool { return true }, down) }()
++	go func() { errChan <- copyBufferLog(remoteRw, serverRw, func(uint64) bool { return true }, up) }()
++	return <-errChan
++}
+diff --git a/core/server/server.go b/core/server/server.go
+index 05a01e3..9ac4cc5 100644
+--- a/core/server/server.go
++++ b/core/server/server.go
+@@ -12,6 +12,7 @@ import (
+ 	"github.com/apernet/quic-go"
+ 	"github.com/apernet/quic-go/http3"
+ 	"github.com/apernet/quic-go/quicvarint"
++	"golang.org/x/time/rate"
+ 
+ 	"github.com/apernet/hysteria/core/v2/internal/congestion"
+ 	"github.com/apernet/hysteria/core/v2/internal/protocol"
+@@ -127,6 +128,9 @@ type h3sHandler struct {
+ 	authenticated bool
+ 	authMutex     sync.Mutex
+ 	authID        string
++	policy        SessionPolicy
++	upLimiter     *rate.Limiter
++	downLimiter   *rate.Limiter
+ 	connID        uint32 // a random id for dump streams
+ 
+ 	udpSM *udpSessionManager // Only set after authentication
+@@ -156,21 +160,32 @@ func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 		}
+ 		authReq := protocol.AuthRequestFromHeader(r.Header)
+ 		actualTx := authReq.Rx
+-		ok, id := h.config.Authenticator.Authenticate(h.conn.RemoteAddr(), authReq.Auth, actualTx)
++		ok, id, sessionPolicy := authenticateWithPolicy(h.config.Authenticator, h.conn.RemoteAddr(), authReq.Auth, actualTx)
+ 		if ok {
+ 			// Set authenticated flag
+ 			h.authenticated = true
+ 			h.authID = id
++			h.policy = sessionPolicy
++			h.upLimiter = newSessionLimiter(sessionPolicy.MaxRx)
++			h.downLimiter = newSessionLimiter(sessionPolicy.MaxTx)
++			maxTx := h.config.BandwidthConfig.MaxTx
++			maxRx := h.config.BandwidthConfig.MaxRx
++			if sessionPolicy.MaxTx > 0 && (maxTx == 0 || sessionPolicy.MaxTx < maxTx) {
++				maxTx = sessionPolicy.MaxTx
++			}
++			if sessionPolicy.MaxRx > 0 && (maxRx == 0 || sessionPolicy.MaxRx < maxRx) {
++				maxRx = sessionPolicy.MaxRx
++			}
+ 			if h.config.IgnoreClientBandwidth {
+ 				// Ignore client bandwidth and use the configured congestion controller.
+ 				congestion.UseConfigured(h.conn, h.config.CongestionConfig.Type, h.config.CongestionConfig.BBRProfile)
+ 				actualTx = 0
+ 			} else {
+ 				// actualTx = min(serverTx, clientRx)
+-				if h.config.BandwidthConfig.MaxTx > 0 && actualTx > h.config.BandwidthConfig.MaxTx {
++				if maxTx > 0 && actualTx > maxTx {
+ 					// We have a maxTx limit and the client is asking for more than that,
+ 					// return and use the limit instead
+-					actualTx = h.config.BandwidthConfig.MaxTx
++					actualTx = maxTx
+ 				}
+ 				if actualTx > 0 {
+ 					congestion.UseBrutal(h.conn, actualTx)
+@@ -182,7 +197,7 @@ func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 			// Auth OK, send response
+ 			protocol.AuthResponseToHeader(w.Header(), protocol.AuthResponse{
+ 				UDPEnabled: !h.config.DisableUDP,
+-				Rx:         h.config.BandwidthConfig.MaxRx,
++				Rx:         maxRx,
+ 				RxAuto:     h.config.IgnoreClientBandwidth,
+ 			})
+ 			w.WriteHeader(protocol.StatusAuthOK)
+@@ -199,7 +214,7 @@ func (h *h3sHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 			if !h.config.DisableUDP {
+ 				go func() {
+ 					sm := newUDPSessionManager(
+-						&udpIOImpl{h.conn, id, h.config.TrafficLogger, h.config.RequestHook, h.config.Outbound},
++						&udpIOImpl{h.conn, id, h.config.TrafficLogger, h.config.RequestHook, h.config.Outbound, h.policy, h.upLimiter, h.downLimiter},
+ 						&udpEventLoggerImpl{h.conn, id, h.config.EventLogger},
+ 						h.config.UDPIdleTimeout,
+ 					)
+@@ -261,6 +276,11 @@ func (h *h3sHandler) handleTCPRequest(stream *utils.QStream) {
+ 		_ = stream.Close()
+ 		return
+ 	}
++	if !h.policy.P2PAllowed && isP2PAddress(reqAddr) {
++		_ = protocol.WriteTCPResponse(stream, false, errP2PBlocked.Error())
++		_ = stream.Close()
++		return
++	}
+ 	streamStats.ReqAddr.Store(reqAddr)
+ 	// Call the hook if set
+ 	var putback []byte
+@@ -278,6 +298,10 @@ func (h *h3sHandler) handleTCPRequest(stream *utils.QStream) {
+ 				_ = stream.Close()
+ 				return
+ 			}
++			if !h.policy.P2PAllowed && isP2PPayload(putback) {
++				_ = stream.Close()
++				return
++			}
+ 			streamStats.setHookedReqAddr(reqAddr)
+ 		}
+ 	}
+@@ -310,7 +334,9 @@ func (h *h3sHandler) handleTCPRequest(stream *utils.QStream) {
+ 	}
+ 	// Start proxying
+ 	if trafficLogger != nil {
+-		err = copyTwoWayEx(h.authID, stream, tConn, trafficLogger, streamStats)
++		err = copyTwoWayEx(h.authID, stream, tConn, trafficLogger, streamStats, h.upLimiter, h.downLimiter)
++	} else if h.upLimiter != nil || h.downLimiter != nil {
++		err = copyTwoWayLimited(stream, tConn, h.upLimiter, h.downLimiter)
+ 	} else {
+ 		// Use the fast path if no traffic logger is set
+ 		err = copyTwoWay(stream, tConn)
+@@ -343,6 +369,9 @@ type udpIOImpl struct {
+ 	TrafficLogger TrafficLogger
+ 	RequestHook   RequestHook
+ 	Outbound      Outbound
++	Policy        SessionPolicy
++	UpLimiter     *rate.Limiter
++	DownLimiter   *rate.Limiter
+ }
+ 
+ func (io *udpIOImpl) ReceiveMessage() (*protocol.UDPMessage, error) {
+@@ -365,11 +394,21 @@ func (io *udpIOImpl) ReceiveMessage() (*protocol.UDPMessage, error) {
+ 				return nil, errDisconnect
+ 			}
+ 		}
++		if io.UpLimiter != nil {
++			if err := io.UpLimiter.WaitN(context.Background(), len(udpMsg.Data)); err != nil {
++				return nil, err
++			}
++		}
+ 		return udpMsg, nil
+ 	}
+ }
+ 
+ func (io *udpIOImpl) SendMessage(buf []byte, msg *protocol.UDPMessage) error {
++	if io.DownLimiter != nil {
++		if err := io.DownLimiter.WaitN(context.Background(), len(msg.Data)); err != nil {
++			return err
++		}
++	}
+ 	if io.TrafficLogger != nil {
+ 		ok := io.TrafficLogger.LogTraffic(io.AuthID, 0, uint64(len(msg.Data)))
+ 		if !ok {
+@@ -387,6 +426,9 @@ func (io *udpIOImpl) SendMessage(buf []byte, msg *protocol.UDPMessage) error {
+ }
+ 
+ func (io *udpIOImpl) Hook(data []byte, reqAddr *string) error {
++	if !io.Policy.P2PAllowed && (isP2PAddress(*reqAddr) || isP2PPayload(data)) {
++		return errP2PBlocked
++	}
+ 	if io.RequestHook != nil && io.RequestHook.Check(true, *reqAddr) {
+ 		return io.RequestHook.UDP(data, reqAddr)
+ 	} else {
+diff --git a/core/server/session_policy.go b/core/server/session_policy.go
+new file mode 100644
+index 0000000..d444542
+--- /dev/null
++++ b/core/server/session_policy.go
+@@ -0,0 +1,53 @@
++package server
++
++import (
++	"errors"
++	"net"
++	"strconv"
++	"strings"
++
++	"golang.org/x/time/rate"
++)
++
++var errP2PBlocked = errors.New("peer-to-peer traffic is disabled for this session")
++
++func authenticateWithPolicy(a Authenticator, addr net.Addr, auth string, tx uint64) (bool, string, SessionPolicy) {
++	if policyAuth, ok := a.(PolicyAuthenticator); ok {
++		return policyAuth.AuthenticateWithPolicy(addr, auth, tx)
++	}
++	ok, id := a.Authenticate(addr, auth, tx)
++	return ok, id, SessionPolicy{P2PAllowed: true}
++}
++
++func newSessionLimiter(bytesPerSecond uint64) *rate.Limiter {
++	if bytesPerSecond == 0 {
++		return nil
++	}
++	burst := int(bytesPerSecond)
++	if burst > 64*1024 {
++		burst = 64 * 1024
++	}
++	if burst < 1500 {
++		burst = 1500
++	}
++	return rate.NewLimiter(rate.Limit(bytesPerSecond), burst)
++}
++
++func isP2PAddress(address string) bool {
++	host, portText, err := net.SplitHostPort(address)
++	if err != nil {
++		host = address
++	}
++	host = strings.ToLower(strings.TrimSuffix(host, "."))
++	if strings.Contains(host, "tracker") || strings.Contains(host, "announce") {
++		return true
++	}
++	port, _ := strconv.Atoi(portText)
++	return (port >= 6881 && port <= 6889) || port == 51413 || port == 6969
++}
++
++func isP2PPayload(data []byte) bool {
++	text := string(data)
++	return strings.HasPrefix(text, "\x13BitTorrent protocol") ||
++		strings.Contains(text, "announce_peer") || strings.Contains(text, "find_node")
++}
+diff --git a/extras/auth/http.go b/extras/auth/http.go
+index 379a8d7..464905b 100644
+--- a/extras/auth/http.go
++++ b/extras/auth/http.go
+@@ -47,8 +47,16 @@ type httpAuthRequest struct {
+ }
+ 
+ type httpAuthResponse struct {
+-	OK bool   `json:"ok"`
+-	ID string `json:"id"`
++	OK     bool              `json:"ok"`
++	ID     string            `json:"id"`
++	Policy httpSessionPolicy `json:"policy"`
++}
++
++type httpSessionPolicy struct {
++	UpBPS      uint64 `json:"upBps"`
++	DownBPS    uint64 `json:"downBps"`
++	Priority   uint8  `json:"priority"`
++	P2PAllowed bool   `json:"p2pAllowed"`
+ }
+ 
+ func (a *HTTPAuthenticator) post(req *httpAuthRequest) (*httpAuthResponse, error) {
+@@ -77,6 +85,11 @@ func (a *HTTPAuthenticator) post(req *httpAuthRequest) (*httpAuthResponse, error
+ }
+ 
+ func (a *HTTPAuthenticator) Authenticate(addr net.Addr, auth string, tx uint64) (ok bool, id string) {
++	ok, id, _ = a.AuthenticateWithPolicy(addr, auth, tx)
++	return ok, id
++}
++
++func (a *HTTPAuthenticator) AuthenticateWithPolicy(addr net.Addr, auth string, tx uint64) (ok bool, id string, policy server.SessionPolicy) {
+ 	req := &httpAuthRequest{
+ 		Addr: addr.String(),
+ 		Auth: auth,
+@@ -84,7 +97,19 @@ func (a *HTTPAuthenticator) Authenticate(addr net.Addr, auth string, tx uint64)
+ 	}
+ 	resp, err := a.post(req)
+ 	if err != nil {
+-		return false, ""
++		return false, "", server.SessionPolicy{}
++	}
++	return resp.OK, resp.ID, server.SessionPolicy{
++		MaxTx:      bitsToBytes(resp.Policy.DownBPS),
++		MaxRx:      bitsToBytes(resp.Policy.UpBPS),
++		Priority:   resp.Policy.Priority,
++		P2PAllowed: resp.Policy.P2PAllowed,
++	}
++}
++
++func bitsToBytes(bits uint64) uint64 {
++	if bits == 0 {
++		return 0
+ 	}
+-	return resp.OK, resp.ID
++	return (bits + 7) / 8
+ }
+-- 
+2.50.1 (Apple Git-155)
+

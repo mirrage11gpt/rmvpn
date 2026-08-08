@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+DOMAIN_FILE=/etc/risevpn/domain
+TLS_DIR=/etc/risevpn/tls
+test -r "$DOMAIN_FILE"
+domain=$(sed -n '1p' "$DOMAIN_FILE")
+case "$domain" in *[!A-Za-z0-9.-]*|'') exit 1 ;; esac
+
+install -d -m 0750 -o root -g risevpn "$TLS_DIR"
+install -m 0640 -o root -g risevpn "/etc/letsencrypt/live/$domain/fullchain.pem" "$TLS_DIR/fullchain.pem"
+install -m 0640 -o root -g risevpn "/etc/letsencrypt/live/$domain/privkey.pem" "$TLS_DIR/privkey.pem"
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl try-restart risevpn-node.service risevpn-hysteria.service || true
+fi
+

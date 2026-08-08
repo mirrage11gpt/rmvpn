@@ -1,0 +1,42 @@
+From 9b0a1af063f5d1456b124fdcaee8f74b33e3e04b Mon Sep 17 00:00:00 2001
+From: RiseVPN <dev@risevpn.local>
+Date: Sat, 8 Aug 2026 17:42:41 +0300
+Subject: [PATCH] risevpn: preserve legacy HTTP auth policy defaults
+
+---
+ extras/auth/http.go | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/extras/auth/http.go b/extras/auth/http.go
+index df3a7a9..b6da7e1 100644
+--- a/extras/auth/http.go
++++ b/extras/auth/http.go
+@@ -58,7 +58,7 @@ type httpSessionPolicy struct {
+ 	UpBPS      uint64 `json:"upBps"`
+ 	DownBPS    uint64 `json:"downBps"`
+ 	Priority   uint8  `json:"priority"`
+-	P2PAllowed bool   `json:"p2pAllowed"`
++	P2PAllowed *bool  `json:"p2pAllowed"`
+ }
+ 
+ type httpAuthorizeRequest struct {
+@@ -112,11 +112,15 @@ func (a *HTTPAuthenticator) AuthenticateWithPolicy(addr net.Addr, auth string, t
+ 	if err != nil {
+ 		return false, "", server.SessionPolicy{}
+ 	}
++	p2pAllowed := true
++	if resp.Policy.P2PAllowed != nil {
++		p2pAllowed = *resp.Policy.P2PAllowed
++	}
+ 	return resp.OK, resp.ID, server.SessionPolicy{
+ 		MaxTx:      bitsToBytes(resp.Policy.DownBPS),
+ 		MaxRx:      bitsToBytes(resp.Policy.UpBPS),
+ 		Priority:   resp.Policy.Priority,
+-		P2PAllowed: resp.Policy.P2PAllowed,
++		P2PAllowed: p2pAllowed,
+ 	}
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

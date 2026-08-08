@@ -1,0 +1,33 @@
+[Unit]
+Description=RiseVPN location agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=risevpn-agent
+Group=risevpn
+ExecStart=/usr/local/lib/risevpn/risevpn-node-bin serve --config /etc/risevpn/node.conf
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ReadWritePaths=/var/lib/risevpn
+ReadOnlyPaths=/etc/risevpn /etc/letsencrypt
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+
