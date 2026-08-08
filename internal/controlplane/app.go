@@ -263,16 +263,19 @@ func (a *App) telegramCallback(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &pending)
 	token, err := a.oauth.Exchange(r.Context(), r.URL.Query().Get("code"), oauth2.SetAuthURLParam("code_verifier", pending["verifier"]))
 	if err != nil {
+		slog.WarnContext(r.Context(), "telegram authorization code exchange failed", "requestId", currentRequestID(r), "error", err)
 		problem(w, 401, "oidc-code", "Telegram не подтвердил вход", "")
 		return
 	}
 	idToken, ok := token.Extra("id_token").(string)
 	if !ok {
+		slog.WarnContext(r.Context(), "telegram token response has no id_token", "requestId", currentRequestID(r))
 		problem(w, 401, "oidc-token", "Telegram не вернул идентификатор", "")
 		return
 	}
 	verified, err := a.verifier.Verify(r.Context(), idToken)
 	if err != nil {
+		slog.WarnContext(r.Context(), "telegram id_token verification failed", "requestId", currentRequestID(r), "error", err)
 		problem(w, 401, "oidc-token", "Не удалось проверить вход", "")
 		return
 	}
@@ -283,7 +286,13 @@ func (a *App) telegramCallback(w http.ResponseWriter, r *http.Request) {
 		Picture  string `json:"picture"`
 		Nonce    string `json:"nonce"`
 	}
-	if err = verified.Claims(&claims); err != nil || claims.Nonce != pending["nonce"] {
+	if err = verified.Claims(&claims); err != nil {
+		slog.WarnContext(r.Context(), "telegram id_token claims are invalid", "requestId", currentRequestID(r), "error", err)
+		problem(w, 401, "oidc-nonce", "Проверка входа не пройдена", "")
+		return
+	}
+	if claims.Nonce != pending["nonce"] {
+		slog.WarnContext(r.Context(), "telegram id_token nonce mismatch", "requestId", currentRequestID(r))
 		problem(w, 401, "oidc-nonce", "Проверка входа не пройдена", "")
 		return
 	}
@@ -681,12 +690,17 @@ func decode(r *http.Request, d any) error {
 	return dec.Decode(d)
 }
 func jsonResponse(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
 func problem(w http.ResponseWriter, status int, kind, title, detail string) {
-	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"type": "https://risevpn.ru/problems/" + kind, "title": title, "status": status, "detail": detail})
+	_ = json.NewEncoder(w).Encode(map[string]any{"type": "urn:risevpn:problem:" + kind, "title": title, "status": status, "detail": detail})
+}
+
+func currentRequestID(r *http.Request) string {
+	id, _ := r.Context().Value(requestIDKey{}).(string)
+	return id
 }
