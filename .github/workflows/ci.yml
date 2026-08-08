@@ -41,6 +41,7 @@ jobs:
       - run: go build -trimpath -o target/risevpn-control ./cmd/risevpn-control
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
       - run: shellcheck install.sh packaging/risevpn-node-admin packaging/risevpn-cert-* scripts/*.sh deploy/*.sh
+      - run: ./scripts/test-installer-vars.sh
 
   container:
     runs-on: ubuntu-latest

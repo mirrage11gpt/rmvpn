@@ -122,7 +122,7 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain node-msk-1.example.com \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.2.0
+  --version 0.2.1
 ```
 
 Установщик проверяет ОС, архитектуру, DNS, origin, занятые порты, minisign и

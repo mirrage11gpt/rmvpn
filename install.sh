@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-VERSION=0.2.0
+RELEASE_VERSION=0.2.1
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -11,7 +11,7 @@ LOCAL_DIR=
 UPGRADE=false
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.0] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.1] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -20,7 +20,7 @@ while [ "$#" -gt 0 ]; do
     --domain) DOMAIN=${2:-}; shift 2 ;;
     --acme-email) ACME_EMAIL=${2:-}; shift 2 ;;
     --masquerade-url) MASQUERADE_URL=${2:-}; shift 2 ;;
-    --version) VERSION=${2:-}; shift 2 ;;
+    --version) RELEASE_VERSION=${2:-}; shift 2 ;;
     --release-base-url) RELEASE_BASE_URL=${2:-}; shift 2 ;;
     --release-public-key) RELEASE_PUBLIC_KEY=${2:-}; shift 2 ;;
     --local-dir) LOCAL_DIR=${2:-}; shift 2 ;;
@@ -88,7 +88,7 @@ fetch() {
     cp "$LOCAL_DIR/$name" "$WORK/$name"
   else
     curl --proto '=https' --tlsv1.2 --fail --location --show-error \
-      "$RELEASE_BASE_URL/v$VERSION/$name" -o "$WORK/$name"
+      "$RELEASE_BASE_URL/v$RELEASE_VERSION/$name" -o "$WORK/$name"
   fi
 }
 
@@ -155,7 +155,7 @@ tls_key_file=/etc/risevpn/tls/privkey.pem
 traffic_stats_url=http://127.0.0.1:9999
 traffic_stats_secret=$TRAFFIC_SECRET
 release_public_key=$RELEASE_PUBLIC_KEY
-agent_version=$VERSION
+agent_version=$RELEASE_VERSION
 EOF
 
 escaped_url=$(printf '%s' "$MASQUERADE_URL" | sed 's/[&|]/\\&/g')
@@ -227,5 +227,5 @@ if [ "$healthy" != true ]; then
 fi
 
 echo
-echo "RiseVPN Node $VERSION is healthy. Enrollment key (valid for 24 hours):"
+echo "RiseVPN Node $RELEASE_VERSION is healthy. Enrollment key (valid for 24 hours):"
 /usr/local/lib/risevpn/risevpn-node-bin enrollment show --config /etc/risevpn/node.conf
