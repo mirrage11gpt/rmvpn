@@ -1,14 +1,14 @@
 # RiseVPN
 
 Monorepo RiseVPN: центральная веб‑платформа и серверный агент локации с
-Hysteria 2 и резервным VLESS Reality поверх TCP. Узел устанавливается на Ubuntu 26.04,
+Hysteria 2 и CDN‑совместимым VLESS WebSocket поверх TLS. Узел устанавливается на Ubuntu 26.04,
 работает на одном публичном IP и выдаёт одноразовый ключ `rvpn1_...` для
 подключения к RiseVPN Control.
 
 Пошаговое production-развёртывание центрального сервера, создание первого
 владельца и подключение локации описаны в [`INSTALL.md`](INSTALL.md).
 
-## RiseVPN Control v0.3.0
+## RiseVPN Control v0.4.0
 
 Центральный сервер — модульный Go‑монолит со встроенной React/Vite‑сборкой,
 PostgreSQL как источником истины и Redis для сессий, rate limits и короткого
@@ -63,7 +63,7 @@ docker compose config
 - Ed25519-идентичность узла и одноразовый enrollment со сроком 24 часа;
 - временный HTTPS claim endpoint на TCP 8443 и исходящий mTLS WebSocket после claim;
 - локальные auth/authorize API для Hysteria, недоступные извне;
-- динамическую выдачу VLESS Reality credentials через локальный Xray API;
+- динамическую выдачу VLESS WebSocket credentials через локальный Xray API;
 - тарифы Trial, Lite, Plus и Ultra, серверные speed limits и throttling в основном Hysteria‑транспорте;
 - отдельные device credentials, revoke и quota leases;
 - сбор статистики Hysteria и Xray каждые 15 секунд и отключение исчерпанных Trial/leases;
@@ -123,7 +123,7 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain node-msk-1.example.com \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.3.1
+  --version 0.4.0
 ```
 
 Установщик проверяет ОС, архитектуру, DNS, origin, занятые порты, minisign и
@@ -139,7 +139,7 @@ risevpn-node doctor
 risevpn-node logs -f
 risevpn-node enrollment show
 risevpn-node reenroll
-risevpn-node update --version 0.3.1
+risevpn-node update --version 0.4.0
 risevpn-node uninstall
 risevpn-node uninstall --purge-data
 ```

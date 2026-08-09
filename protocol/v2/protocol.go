@@ -29,6 +29,7 @@ const (
 	CapabilityCertRotate     Capability = "certificate.rotate"
 	CapabilityAtomicUpdate   Capability = "update.atomic"
 	CapabilityTCPFallback    Capability = "fallback.vless-reality"
+	CapabilityCDNWebSocket   Capability = "fallback.vless-ws-tls"
 )
 
 type Hello struct {

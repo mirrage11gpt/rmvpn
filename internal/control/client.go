@@ -114,8 +114,11 @@ func (c *Client) connect(ctx context.Context) error {
 	nodeID, _, _ := c.store.State(ctx, "node_id")
 	realityPublicKey, _, _ := c.store.State(ctx, "reality_public_key")
 	realityShortID, _, _ := c.store.State(ctx, "reality_short_id")
+	xrayTransport, _, _ := c.store.State(ctx, "xray_transport")
 	capabilities := []protocol.Capability{protocol.CapabilityACK, protocol.CapabilityQuotaLease, protocol.CapabilitySessionKick, protocol.CapabilityPolicyOverride, protocol.CapabilityCertRotate, protocol.CapabilityAtomicUpdate}
-	if realityPublicKey != "" && realityShortID != "" {
+	if xrayTransport == "ws-tls" {
+		capabilities = append(capabilities, protocol.CapabilityCDNWebSocket)
+	} else if realityPublicKey != "" && realityShortID != "" {
 		capabilities = append(capabilities, protocol.CapabilityTCPFallback)
 	}
 	if err := write(ctx, connection, "hello", protocol.Hello{NodeID: nodeID, AgentVersion: c.version, Protocols: []int{1, 2}, Capabilities: capabilities, RealityPublicKey: realityPublicKey, RealityShortID: realityShortID}); err != nil {

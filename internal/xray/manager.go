@@ -24,7 +24,7 @@ import (
 	risevless "github.com/mirrage11gpt/rmvpn/internal/vless"
 )
 
-const inboundTag = "risevpn-vless"
+const inboundTag = "risevpn-vless-ws"
 
 type Manager struct {
 	store   *store.Store
@@ -201,7 +201,7 @@ func (m *Manager) add(ctx context.Context, device model.Device) error {
 	defer connection.Close()
 	operation := &proxymancommand.AddUserOperation{User: &xprotocol.User{
 		Email: email(device.ID), Level: 0,
-		Account: serial.ToTypedMessage(&xvless.Account{Id: id, Flow: "xtls-rprx-vision", Encryption: "none"}),
+		Account: serial.ToTypedMessage(&xvless.Account{Id: id, Encryption: "none"}),
 	}}
 	_, err = proxymancommand.NewHandlerServiceClient(connection).AlterInbound(ctx, &proxymancommand.AlterInboundRequest{
 		Tag: inboundTag, Operation: serial.ToTypedMessage(operation),

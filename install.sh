@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-RELEASE_VERSION=0.3.1
+RELEASE_VERSION=0.4.0
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -11,7 +11,7 @@ LOCAL_DIR=
 UPGRADE=false
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.3.1] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.4.0] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -195,6 +195,7 @@ tls_key_file=/etc/risevpn/tls/privkey.pem
 traffic_stats_url=http://127.0.0.1:9999
 traffic_stats_secret=$TRAFFIC_SECRET
 xray_api_address=127.0.0.1:10085
+xray_transport=ws-tls
 reality_private_key=$REALITY_PRIVATE_KEY
 reality_public_key=$REALITY_PUBLIC_KEY
 reality_short_id=$REALITY_SHORT_ID

@@ -15,7 +15,7 @@ COPY . .
 COPY --from=web /src/webembed/dist/ ./webembed/dist/
 # CI runs the complete test suite. The production image builds only the control
 # package and serializes compilation so a 2 GB VPS can build without an OOM.
-RUN CGO_ENABLED=0 go build -p=1 -trimpath -ldflags "-s -w -X main.version=0.3.0" -o /out/risevpn-control ./cmd/risevpn-control
+RUN CGO_ENABLED=0 go build -p=1 -trimpath -ldflags "-s -w -X main.version=0.4.0" -o /out/risevpn-control ./cmd/risevpn-control
 
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates tzdata openssl su-exec && addgroup -S risevpn && adduser -S -G risevpn risevpn

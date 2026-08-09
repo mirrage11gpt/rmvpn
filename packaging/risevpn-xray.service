@@ -1,5 +1,5 @@
 [Unit]
-Description=RiseVPN VLESS Reality TCP fallback
+Description=RiseVPN VLESS WebSocket TLS CDN transport
 After=network-online.target risevpn-hysteria.service
 Wants=network-online.target
 Requires=risevpn-hysteria.service

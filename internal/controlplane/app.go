@@ -682,12 +682,12 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var deviceID, subject, domain, nodeID string
-	var assignedDomain, assignedNodeID, assignedRealityPublicKey, assignedRealityShortID *string
+	var assignedDomain, assignedNodeID *string
 	var cipher, storedHWID []byte
 	var plan, status string
 	var periodEnd *time.Time
-	var termsAccepted bool
-	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain,n.reality_public_key,n.reality_short_id,u.terms_accepted_at IS NOT NULL FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain, &assignedRealityPublicKey, &assignedRealityShortID, &termsAccepted)
+	var termsAccepted, supportsCDNWebSocket bool
+	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain,COALESCE(n.capabilities @> '["fallback.vless-ws-tls"]'::jsonb,false),u.terms_accepted_at IS NOT NULL FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain, &supportsCDNWebSocket, &termsAccepted)
 	if err != nil {
 		problem(w, 404, "subscription-token", "Ссылка подписки недействительна", "")
 		return
@@ -741,7 +741,7 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		nodeID = *assignedNodeID
 	}
 	if domain == "" {
-		err = a.db.QueryRow(r.Context(), `SELECT id,domain,reality_public_key,reality_short_id FROM nodes WHERE status='healthy' AND compliance_fetched_at>now()-interval '6 hours' AND reality_public_key IS NOT NULL AND reality_short_id IS NOT NULL ORDER BY load_ratio ASC,controller_rtt_ms ASC NULLS LAST LIMIT 1`).Scan(&nodeID, &domain, &assignedRealityPublicKey, &assignedRealityShortID)
+		err = a.db.QueryRow(r.Context(), `SELECT id,domain FROM nodes WHERE status='healthy' AND compliance_fetched_at>now()-interval '6 hours' AND capabilities @> '["fallback.vless-ws-tls"]'::jsonb ORDER BY load_ratio ASC,controller_rtt_ms ASC NULLS LAST LIMIT 1`).Scan(&nodeID, &domain)
 		if err != nil {
 			problem(w, 503, "no-route", "Сейчас нет доступного маршрута", "Попробуйте обновить подписку позже.")
 			return
@@ -759,9 +759,9 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	uri := hysteriaURI(credential, domain, a.config.HysteriaObfsPassword)
 	transport := "hysteria2"
-	if assignedRealityPublicKey != nil && assignedRealityShortID != nil && *assignedRealityPublicKey != "" && *assignedRealityShortID != "" {
-		uri = vlessRealityURI(credential, domain, *assignedRealityPublicKey, *assignedRealityShortID)
-		transport = "vless-reality"
+	if supportsCDNWebSocket {
+		uri = vlessWebSocketURI(credential, domain)
+		transport = "vless-ws-tls"
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("profile-title", "RiseVPN · Auto")
@@ -785,19 +785,17 @@ func hysteriaURI(credential, domain, obfsPassword string) string {
 	return "hysteria2://" + url.QueryEscape(credential) + "@" + domain + ":443/?" + query.Encode() + "#RiseVPN-Auto"
 }
 
-func vlessRealityURI(credential, domain, publicKey, shortID string) string {
+func vlessWebSocketURI(credential, domain string) string {
 	query := url.Values{
 		"encryption": {"none"},
-		"flow":       {"xtls-rprx-vision"},
-		"fp":         {"firefox"},
-		"pbk":        {publicKey},
-		"security":   {"reality"},
-		"sid":        {shortID},
+		"fp":         {"ios"},
+		"host":       {domain},
+		"path":       {"/risevpn-v1"},
+		"security":   {"tls"},
 		"sni":        {domain},
-		"spx":        {"/"},
-		"type":       {"tcp"},
+		"type":       {"ws"},
 	}
-	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN-Auto-TCP"
+	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN-Auto-CDN"
 }
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

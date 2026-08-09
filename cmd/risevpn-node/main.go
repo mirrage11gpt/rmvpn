@@ -129,7 +129,7 @@ func serve(args []string) error {
 	collector := usage.New(database, cfg.TrafficStatsURL, cfg.TrafficStatsSecret)
 	var xrayManager *xray.Manager
 	if cfg.RealityPublicKey != "" && cfg.RealityShortID != "" {
-		if err := database.SetStates(ctx, map[string]string{"reality_public_key": cfg.RealityPublicKey, "reality_short_id": cfg.RealityShortID}); err != nil {
+		if err := database.SetStates(ctx, map[string]string{"reality_public_key": cfg.RealityPublicKey, "reality_short_id": cfg.RealityShortID, "xray_transport": cfg.XrayTransport}); err != nil {
 			return err
 		}
 		xrayManager = xray.New(database, cfg.XrayAPIAddress)

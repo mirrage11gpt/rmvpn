@@ -20,6 +20,7 @@ type Config struct {
 	TrafficStatsURL    string
 	TrafficStatsSecret string
 	XrayAPIAddress     string
+	XrayTransport      string
 	RealityPrivateKey  string
 	RealityPublicKey   string
 	RealityShortID     string
@@ -59,6 +60,7 @@ func Load(path string) (Config, error) {
 		TrafficStatsURL:    fallback(values["traffic_stats_url"], "http://127.0.0.1:9999"),
 		TrafficStatsSecret: values["traffic_stats_secret"],
 		XrayAPIAddress:     fallback(values["xray_api_address"], "127.0.0.1:10085"),
+		XrayTransport:      fallback(values["xray_transport"], "reality"),
 		RealityPrivateKey:  values["reality_private_key"],
 		RealityPublicKey:   values["reality_public_key"],
 		RealityShortID:     values["reality_short_id"],

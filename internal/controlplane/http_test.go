@@ -67,8 +67,8 @@ func TestHysteriaURIWithoutObfuscation(t *testing.T) {
 	}
 }
 
-func TestVLESSRealityURI(t *testing.T) {
-	parsed, err := url.Parse(vlessRealityURI("credential", "f1.risevpn.space", "public-key", "0123456789abcdef"))
+func TestVLESSWebSocketURI(t *testing.T) {
+	parsed, err := url.Parse(vlessWebSocketURI("credential", "f1.risevpn.space"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +80,8 @@ func TestVLESSRealityURI(t *testing.T) {
 	}
 	query := parsed.Query()
 	for key, expected := range map[string]string{
-		"security": "reality", "flow": "xtls-rprx-vision", "type": "tcp", "sni": "f1.risevpn.space",
-		"fp": "firefox", "pbk": "public-key", "sid": "0123456789abcdef", "encryption": "none",
+		"security": "tls", "type": "ws", "sni": "f1.risevpn.space", "host": "f1.risevpn.space",
+		"fp": "ios", "path": "/risevpn-v1", "encryption": "none",
 	} {
 		if query.Get(key) != expected {
 			t.Fatalf("unexpected %s: %q", key, query.Get(key))

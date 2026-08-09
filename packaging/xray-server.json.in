@@ -18,40 +18,60 @@
   },
   "inbounds": [
     {
-      "tag": "risevpn-vless",
+      "tag": "risevpn-tls-gateway",
       "listen": "0.0.0.0",
       "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none",
+        "fallbacks": [
+          {
+            "path": "/risevpn-v1",
+            "dest": 10086,
+            "xver": 0
+          },
+          {
+            "dest": 80,
+            "xver": 0
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "@DOMAIN@",
+          "rejectUnknownSni": true,
+          "alpn": ["http/1.1"],
+          "certificates": [
+            {
+              "certificateFile": "/etc/risevpn/tls/fullchain.pem",
+              "keyFile": "/etc/risevpn/tls/privkey.pem"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "risevpn-vless-ws",
+      "listen": "127.0.0.1",
+      "port": 10086,
       "protocol": "vless",
       "settings": {
         "clients": [],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "target": "127.0.0.1:8444",
-          "xver": 0,
-          "serverNames": ["@DOMAIN@"],
-          "privateKey": "@REALITY_PRIVATE_KEY@",
-          "maxTimeDiff": 60000,
-          "shortIds": ["@REALITY_SHORT_ID@"],
-          "limitFallbackUpload": {
-            "afterBytes": 1048576,
-            "bytesPerSec": 262144,
-            "burstBytesPerSec": 524288
-          },
-          "limitFallbackDownload": {
-            "afterBytes": 1048576,
-            "bytesPerSec": 262144,
-            "burstBytesPerSec": 524288
-          }
+        "network": "ws",
+        "security": "none",
+        "wsSettings": {
+          "path": "/risevpn-v1"
         }
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls", "quic"],
+        "destOverride": ["http", "tls"],
         "routeOnly": true
       }
     }

@@ -24,7 +24,7 @@ Responsive Russian-language web platform: public marketing site, authenticated c
 
 ## Product Purpose
 
-RiseVPN provides a simple VPN subscription with centralized account, device, quota, location, and compliance management. Locations serve Hysteria 2 over UDP and a VLESS Reality TCP fallback. The first production contour targets 10,000 accounts, 2,000 concurrently connected devices, and 100 locations on a single VPS deployment.
+RiseVPN provides a simple VPN subscription with centralized account, device, quota, location, and compliance management. Locations serve Hysteria 2 over UDP and a CDN-compatible VLESS WebSocket TLS fallback. The first production contour targets 10,000 accounts, 2,000 concurrently connected devices, and 100 locations on a single VPS deployment.
 
 The main customer promise is low-friction access: sign in through Telegram, start Trial, bind one device through the subscription request, and receive exactly one working connection selected by the platform.
 
