@@ -28,13 +28,16 @@ const (
 	CapabilityPolicyOverride Capability = "policy.override"
 	CapabilityCertRotate     Capability = "certificate.rotate"
 	CapabilityAtomicUpdate   Capability = "update.atomic"
+	CapabilityTCPFallback    Capability = "fallback.vless-reality"
 )
 
 type Hello struct {
-	NodeID       string       `json:"nodeId"`
-	AgentVersion string       `json:"agentVersion"`
-	Protocols    []int        `json:"protocols"`
-	Capabilities []Capability `json:"capabilities"`
+	NodeID           string       `json:"nodeId"`
+	AgentVersion     string       `json:"agentVersion"`
+	Protocols        []int        `json:"protocols"`
+	Capabilities     []Capability `json:"capabilities"`
+	RealityPublicKey string       `json:"realityPublicKey,omitempty"`
+	RealityShortID   string       `json:"realityShortId,omitempty"`
 }
 
 type Ack struct {

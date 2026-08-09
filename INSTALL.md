@@ -1,7 +1,7 @@
 # Установка RiseVPN
 
 Эта инструкция разворачивает один центральный сервер RiseVPN Control и одну или
-несколько локаций RiseVPN Node. Команды рассчитаны на release `v0.2.6`.
+несколько локаций RiseVPN Node. Команды рассчитаны на release `v0.3.0`.
 
 > Коммерческий запуск нельзя считать завершённым без юридического заключения,
 > реквизитов оператора, политики обработки персональных данных, российского
@@ -241,9 +241,9 @@ sudo apt update
 sudo apt install -y curl minisign
 mkdir -p risevpn-node-install
 cd risevpn-node-install
-curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.2.6/install.sh
-curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.2.6/checksums.txt
-curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.2.6/checksums.txt.minisig
+curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.3.0/install.sh
+curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.3.0/checksums.txt
+curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.3.0/checksums.txt.minisig
 minisign -Vm checksums.txt -x checksums.txt.minisig \
   -P 'RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZvdN+aLyCc'
 grep ' install.sh$' checksums.txt | sha256sum --check
@@ -257,12 +257,14 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain msk-1.example \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.2.6
+  --version 0.3.0
 ```
 
 `masquerade-url` должен принадлежать оператору, открываться по HTTPS и иметь
 валидный сертификат. Установщик проверит Ubuntu, DNS, origin, порты, подпись и
 SHA-256, после чего выведет единственный ключ `rvpn1_…`. Он действует 24 часа.
+Узел одновременно поднимает Hysteria 2 на UDP 443 и резервный VLESS Reality на
+TCP 443. Клиентская подписка содержит один выбранный платформой профиль.
 
 Если терминал был закрыт, ключ можно снова показать:
 

@@ -1,0 +1,69 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": ["HandlerService", "StatsService"]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+      }
+    }
+  },
+  "inbounds": [
+    {
+      "tag": "risevpn-vless",
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "127.0.0.1:8444",
+          "xver": 0,
+          "serverNames": ["@DOMAIN@"],
+          "privateKey": "@REALITY_PRIVATE_KEY@",
+          "maxTimeDiff": 60000,
+          "shortIds": ["@REALITY_SHORT_ID@"],
+          "limitFallbackUpload": {
+            "afterBytes": 1048576,
+            "bytesPerSec": 262144,
+            "burstBytesPerSec": 524288
+          },
+          "limitFallbackDownload": {
+            "afterBytes": 1048576,
+            "bytesPerSec": 262144,
+            "burstBytesPerSec": 524288
+          }
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ]
+}

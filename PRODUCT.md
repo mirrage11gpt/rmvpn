@@ -24,7 +24,7 @@ Responsive Russian-language web platform: public marketing site, authenticated c
 
 ## Product Purpose
 
-RiseVPN provides a simple Hysteria 2 VPN subscription with centralized account, device, quota, location, and compliance management. The first production contour targets 10,000 accounts, 2,000 concurrently connected devices, and 100 locations on a single VPS deployment.
+RiseVPN provides a simple VPN subscription with centralized account, device, quota, location, and compliance management. Locations serve Hysteria 2 over UDP and a VLESS Reality TCP fallback. The first production contour targets 10,000 accounts, 2,000 concurrently connected devices, and 100 locations on a single VPS deployment.
 
 The main customer promise is low-friction access: sign in through Telegram, start Trial, bind one device through the subscription request, and receive exactly one working connection selected by the platform.
 
@@ -39,7 +39,7 @@ The owner intends to market RiseVPN as a legal VPN. Public legal claims are a la
 - Public registration uses official Telegram OIDC Authorization Code with PKCE and requests only `openid`, `profile`, and optional `telegram:bot_access`; phone numbers are not collected.
 - The Telegram bot sends notifications only and does not manage accounts.
 - All plans use automatic location selection. Customers do not receive a manual location override in v1.
-- A subscription response contains exactly one Hysteria 2 connection. Auto-selection admits only healthy, compatible, non-draining nodes with fresh compliance state and uses browser RTT first, load/capacity second, and controller RTT/GeoIP as fallback. A location changes only for at least 15% expected improvement.
+- A subscription response contains exactly one connection selected by the platform. Auto-selection admits only healthy, compatible, non-draining nodes with fresh compliance state and uses browser RTT first, load/capacity second, and controller RTT/GeoIP as fallback. A location changes only for at least 15% expected improvement.
 - Nodes may operate without the controller for up to 24 hours using signed, bounded quota leases.
 - The production compliance source is the third-party Antifilter domain list, polled every 15 minutes with strict validation and a signed last-known-good snapshot. It must never be presented as an official state registry.
 

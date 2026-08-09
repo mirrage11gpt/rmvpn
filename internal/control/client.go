@@ -33,7 +33,12 @@ type Client struct {
 	version    string
 	seenMu     sync.Mutex
 	seen       map[string]struct{}
-	kicker     interface {
+	kickers    []interface {
+		Kick(context.Context, string) error
+	}
+	provisioner interface {
+		Upsert(context.Context, model.Device) error
+		Revoke(context.Context, string) error
 		Kick(context.Context, string) error
 	}
 }
@@ -41,12 +46,22 @@ type Client struct {
 // envelope remains an alias for protocol-v1 tests and source compatibility.
 type envelope = protocol.Envelope
 
-func New(s *store.Store, complianceService *compliance.Service, version string, kickers ...interface {
-	Kick(context.Context, string) error
-}) *Client {
+func New(s *store.Store, complianceService *compliance.Service, version string, integrations ...any) *Client {
 	c := &Client{store: s, compliance: complianceService, version: version, seen: make(map[string]struct{})}
-	if len(kickers) > 0 {
-		c.kicker = kickers[0]
+	for _, integration := range integrations {
+		if provisioner, ok := integration.(interface {
+			Upsert(context.Context, model.Device) error
+			Revoke(context.Context, string) error
+			Kick(context.Context, string) error
+		}); ok {
+			c.provisioner = provisioner
+			continue
+		}
+		if kicker, ok := integration.(interface {
+			Kick(context.Context, string) error
+		}); ok {
+			c.kickers = append(c.kickers, kicker)
+		}
 	}
 	return c
 }
@@ -97,7 +112,13 @@ func (c *Client) connect(ctx context.Context) error {
 	// Keep the limit bounded, but large enough for a signed compliance command.
 	connection.SetReadLimit(64 << 20)
 	nodeID, _, _ := c.store.State(ctx, "node_id")
-	if err := write(ctx, connection, "hello", protocol.Hello{NodeID: nodeID, AgentVersion: c.version, Protocols: []int{1, 2}, Capabilities: []protocol.Capability{protocol.CapabilityACK, protocol.CapabilityQuotaLease, protocol.CapabilitySessionKick, protocol.CapabilityPolicyOverride, protocol.CapabilityCertRotate, protocol.CapabilityAtomicUpdate}}); err != nil {
+	realityPublicKey, _, _ := c.store.State(ctx, "reality_public_key")
+	realityShortID, _, _ := c.store.State(ctx, "reality_short_id")
+	capabilities := []protocol.Capability{protocol.CapabilityACK, protocol.CapabilityQuotaLease, protocol.CapabilitySessionKick, protocol.CapabilityPolicyOverride, protocol.CapabilityCertRotate, protocol.CapabilityAtomicUpdate}
+	if realityPublicKey != "" && realityShortID != "" {
+		capabilities = append(capabilities, protocol.CapabilityTCPFallback)
+	}
+	if err := write(ctx, connection, "hello", protocol.Hello{NodeID: nodeID, AgentVersion: c.version, Protocols: []int{1, 2}, Capabilities: capabilities, RealityPublicKey: realityPublicKey, RealityShortID: realityShortID}); err != nil {
 		return err
 	}
 
@@ -155,6 +176,16 @@ func (c *Client) stateInt(ctx context.Context, key string) int64 {
 	}
 	parsed, _ := strconv.ParseInt(value, 10, 64)
 	return parsed
+}
+
+func (c *Client) kick(ctx context.Context, deviceID string) error {
+	var result error
+	for _, kicker := range c.kickers {
+		if err := kicker.Kick(ctx, deviceID); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
 }
 
 func loadAverage() float64 {
@@ -231,8 +262,16 @@ func (c *Client) handle(ctx context.Context, message protocol.Envelope) error {
 			Plan: payload.Plan, Active: payload.Active, SubscriptionEnds: payload.SubscriptionEnds,
 			PeriodEnds: payload.PeriodEnds, QuotaBytes: payload.QuotaBytes,
 			LeaseBytes: payload.LeaseBytes, LeaseExpires: payload.LeaseExpires})
-		if err == nil && found && previous.CredentialHash != payload.CredentialHash && c.kicker != nil {
-			_ = c.kicker.Kick(ctx, payload.DeviceID)
+		if err == nil && found && previous.CredentialHash != payload.CredentialHash {
+			c.kick(ctx, payload.DeviceID)
+		}
+		if err == nil && c.provisioner != nil {
+			stored, storedFound, storedErr := c.store.DeviceByID(ctx, payload.DeviceID)
+			if storedErr != nil {
+				err = storedErr
+			} else if storedFound {
+				err = c.provisioner.Upsert(ctx, stored)
+			}
 		}
 		return err
 	case "quota.lease":
@@ -264,7 +303,13 @@ func (c *Client) handle(ctx context.Context, message protocol.Envelope) error {
 		}
 		device.LeaseBytes = lease.Bytes
 		device.LeaseExpires = lease.ExpiresAt
-		return c.store.UpsertDevice(ctx, device)
+		if err := c.store.UpsertDevice(ctx, device); err != nil {
+			return err
+		}
+		if c.provisioner != nil {
+			return c.provisioner.Upsert(ctx, device)
+		}
+		return nil
 	case "device.revoke":
 		var payload struct {
 			DeviceID string `json:"deviceId"`
@@ -275,10 +320,12 @@ func (c *Client) handle(ctx context.Context, message protocol.Envelope) error {
 		if err := c.store.RevokeDevice(ctx, payload.DeviceID); err != nil {
 			return err
 		}
-		if c.kicker != nil {
-			return c.kicker.Kick(ctx, payload.DeviceID)
+		if c.provisioner != nil {
+			if err := c.provisioner.Revoke(ctx, payload.DeviceID); err != nil {
+				return err
+			}
 		}
-		return nil
+		return c.kick(ctx, payload.DeviceID)
 	case "session.kick":
 		var payload protocol.DeviceRef
 		if err := json.Unmarshal(message.Data, &payload); err != nil {
@@ -287,10 +334,15 @@ func (c *Client) handle(ctx context.Context, message protocol.Envelope) error {
 		if payload.DeviceID == "" {
 			return errors.New("deviceId is required")
 		}
-		if c.kicker == nil {
+		if c.provisioner == nil && len(c.kickers) == 0 {
 			return errors.New("traffic API kicker is unavailable")
 		}
-		return c.kicker.Kick(ctx, payload.DeviceID)
+		if c.provisioner != nil {
+			if err := c.provisioner.Kick(ctx, payload.DeviceID); err != nil {
+				return err
+			}
+		}
+		return c.kick(ctx, payload.DeviceID)
 	case "policy.override":
 		var payload protocol.PolicyOverride
 		if err := json.Unmarshal(message.Data, &payload); err != nil {

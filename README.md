@@ -1,14 +1,14 @@
 # RiseVPN
 
 Monorepo RiseVPN: центральная веб‑платформа и серверный агент локации с
-минимальным patch-set для Hysteria 2. Узел устанавливается на Ubuntu 26.04,
+Hysteria 2 и резервным VLESS Reality поверх TCP. Узел устанавливается на Ubuntu 26.04,
 работает на одном публичном IP и выдаёт одноразовый ключ `rvpn1_...` для
 подключения к RiseVPN Control.
 
 Пошаговое production-развёртывание центрального сервера, создание первого
 владельца и подключение локации описаны в [`INSTALL.md`](INSTALL.md).
 
-## RiseVPN Control v0.2.0
+## RiseVPN Control v0.3.0
 
 Центральный сервер — модульный Go‑монолит со встроенной React/Vite‑сборкой,
 PostgreSQL как источником истины и Redis для сессий, rate limits и короткого
@@ -63,9 +63,10 @@ docker compose config
 - Ed25519-идентичность узла и одноразовый enrollment со сроком 24 часа;
 - временный HTTPS claim endpoint на TCP 8443 и исходящий mTLS WebSocket после claim;
 - локальные auth/authorize API для Hysteria, недоступные извне;
-- тарифы Trial, Lite, Plus и Ultra, серверные speed limits и throttling;
+- динамическую выдачу VLESS Reality credentials через локальный Xray API;
+- тарифы Trial, Lite, Plus и Ultra, серверные speed limits и throttling в основном Hysteria‑транспорте;
 - отдельные device credentials, revoke и quota leases;
-- сбор статистики Hysteria каждые 15 секунд и отключение исчерпанных Trial/leases;
+- сбор статистики Hysteria и Xray каждые 15 секунд и отключение исчерпанных Trial/leases;
 - подписанный compliance feed, доменные/CIDR/port правила и постоянный stale-alert;
 - P2P-фильтр по tracker-адресам, портам и распознаваемым BitTorrent/µTP payload;
 - HTTP/HTTPS/HTTP3 reverse-proxy masquerade на принадлежащий оператору origin;
@@ -103,7 +104,7 @@ minisign -G -W -p risevpn-release.pub -s risevpn-release.key
 RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZvdN+aLyCc
 ```
 
-Release workflow собирает оба агента, patched Hysteria, packaging archive,
+Release workflow собирает оба агента, patched Hysteria, закреплённый Xray, packaging archive,
 `checksums.txt` и `checksums.txt.minisig`.
 
 ## Установка узла
@@ -122,7 +123,7 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain node-msk-1.example.com \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.2.6
+  --version 0.3.0
 ```
 
 Установщик проверяет ОС, архитектуру, DNS, origin, занятые порты, minisign и
@@ -138,7 +139,7 @@ risevpn-node doctor
 risevpn-node logs -f
 risevpn-node enrollment show
 risevpn-node reenroll
-risevpn-node update --version 0.2.6
+risevpn-node update --version 0.3.0
 risevpn-node uninstall
 risevpn-node uninstall --purge-data
 ```

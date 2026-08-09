@@ -1,4 +1,3 @@
 #!/bin/sh
 set -eu
-systemctl try-restart risevpn-hysteria.service 2>/dev/null || true
-
+systemctl try-restart risevpn-hysteria.service risevpn-xray.service 2>/dev/null || true

@@ -12,6 +12,5 @@ install -m 0640 -o root -g risevpn "/etc/letsencrypt/live/$domain/fullchain.pem"
 install -m 0640 -o root -g risevpn "/etc/letsencrypt/live/$domain/privkey.pem" "$TLS_DIR/privkey.pem"
 
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl try-restart risevpn-node.service risevpn-hysteria.service || true
+  systemctl try-restart risevpn-node.service risevpn-hysteria.service risevpn-xray.service || true
 fi
-

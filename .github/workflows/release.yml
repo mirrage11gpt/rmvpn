@@ -36,6 +36,15 @@ jobs:
           for patch in hysteria-patches/*.patch; do git -C /tmp/hysteria apply "$GITHUB_WORKSPACE/$patch"; done
           cd /tmp/hysteria/app
           GOOS=linux go build -trimpath -ldflags "-s -w" -o "$GITHUB_WORKSPACE/dist/hysteria-risevpn-linux-${GOARCH}" .
+      - name: Build pinned Xray fallback
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+        run: |
+          tag=$(head -n1 xray/UPSTREAM_VERSION)
+          git clone --depth 1 --branch "$tag" https://github.com/XTLS/Xray-core.git /tmp/xray
+          cd /tmp/xray
+          GOOS=linux go build -trimpath -ldflags "-s -w" -o "$GITHUB_WORKSPACE/dist/xray-risevpn-linux-${GOARCH}" ./main
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.arch }}
@@ -62,7 +71,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y minisign
           cd dist
-          sha256sum risevpn-node-linux-* hysteria-risevpn-linux-* risevpn-node-packaging.tar.gz install.sh risevpn-release.pub > checksums.txt
+          sha256sum risevpn-node-linux-* hysteria-risevpn-linux-* xray-risevpn-linux-* risevpn-node-packaging.tar.gz install.sh risevpn-release.pub > checksums.txt
           printf '%s\n' "$MINISIGN_PRIVATE_KEY" > /tmp/risevpn-minisign.key
           minisign -S -s /tmp/risevpn-minisign.key -m checksums.txt -x checksums.txt.minisig
       - uses: softprops/action-gh-release@v3

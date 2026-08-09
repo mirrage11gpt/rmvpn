@@ -241,6 +241,26 @@ func (s *Store) DeviceByID(ctx context.Context, id string) (model.Device, bool, 
 	return scanDevice(row)
 }
 
+func (s *Store) Devices(ctx context.Context) ([]model.Device, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT device_id,credential_hash,plan,active,subscription_ends,
+		period_ends,quota_bytes,used_bytes,lease_bytes,lease_expires,override_up_bps,override_down_bps,override_p2p,override_expires FROM devices ORDER BY device_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var devices []model.Device
+	for rows.Next() {
+		device, found, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			devices = append(devices, device)
+		}
+	}
+	return devices, rows.Err()
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanDevice(row rowScanner) (model.Device, bool, error) {

@@ -19,6 +19,10 @@ type Config struct {
 	TLSKeyFile         string
 	TrafficStatsURL    string
 	TrafficStatsSecret string
+	XrayAPIAddress     string
+	RealityPrivateKey  string
+	RealityPublicKey   string
+	RealityShortID     string
 	AgentVersion       string
 }
 
@@ -54,6 +58,10 @@ func Load(path string) (Config, error) {
 		TLSKeyFile:         fallback(values["tls_key_file"], "/etc/letsencrypt/live/"+values["domain"]+"/privkey.pem"),
 		TrafficStatsURL:    fallback(values["traffic_stats_url"], "http://127.0.0.1:9999"),
 		TrafficStatsSecret: values["traffic_stats_secret"],
+		XrayAPIAddress:     fallback(values["xray_api_address"], "127.0.0.1:10085"),
+		RealityPrivateKey:  values["reality_private_key"],
+		RealityPublicKey:   values["reality_public_key"],
+		RealityShortID:     values["reality_short_id"],
 		AgentVersion:       fallback(values["agent_version"], "dev"),
 	}
 	if cfg.Domain == "" || cfg.MasqueradeURL == "" || cfg.TrafficStatsSecret == "" {

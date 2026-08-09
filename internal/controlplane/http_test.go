@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestProblemUsesUTF8AndDomainIndependentType(t *testing.T) {
@@ -62,5 +64,27 @@ func TestHysteriaURIWithoutObfuscation(t *testing.T) {
 	query := parsed.Query()
 	if query.Has("obfs") || query.Has("obfs-password") {
 		t.Fatalf("unexpected obfuscation parameters: %v", query)
+	}
+}
+
+func TestVLESSRealityURI(t *testing.T) {
+	parsed, err := url.Parse(vlessRealityURI("credential", "f1.risevpn.space", "public-key", "0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "vless" || parsed.Host != "f1.risevpn.space:443" || parsed.User == nil {
+		t.Fatalf("unexpected endpoint: %s", parsed.String())
+	}
+	if _, err := uuid.Parse(parsed.User.Username()); err != nil {
+		t.Fatalf("invalid derived UUID: %v", err)
+	}
+	query := parsed.Query()
+	for key, expected := range map[string]string{
+		"security": "reality", "flow": "xtls-rprx-vision", "type": "tcp", "sni": "f1.risevpn.space",
+		"fp": "chrome", "pbk": "public-key", "sid": "0123456789abcdef", "encryption": "none",
+	} {
+		if query.Get(key) != expected {
+			t.Fatalf("unexpected %s: %q", key, query.Get(key))
+		}
 	}
 }

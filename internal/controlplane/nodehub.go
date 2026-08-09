@@ -2,6 +2,8 @@ package controlplane
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -53,13 +55,17 @@ func (h *NodeHub) Connect(w http.ResponseWriter, r *http.Request) {
 		_ = c.Close(websocket.StatusPolicyViolation, "invalid hello")
 		return
 	}
+	if (hello.RealityPublicKey != "" || hello.RealityShortID != "") && !validRealityHello(hello.RealityPublicKey, hello.RealityShortID) {
+		_ = c.Close(websocket.StatusPolicyViolation, "invalid Reality capability")
+		return
+	}
 	var certificateSerial string
 	if h.db.QueryRow(ctx, `SELECT CASE WHEN certificate_serial=$2 OR next_certificate_serial=$2 THEN $2 ELSE '' END FROM nodes WHERE id=$1`, hello.NodeID, r.Header.Get("X-RiseVPN-Client-Serial")).Scan(&certificateSerial) != nil || certificateSerial == "" {
 		_ = c.Close(websocket.StatusPolicyViolation, "unknown node")
 		return
 	}
 	caps, _ := json.Marshal(hello.Capabilities)
-	_, _ = h.db.Exec(ctx, `UPDATE nodes SET status='healthy',agent_version=$1,protocol_version=$2,capabilities=$3,last_heartbeat_at=now() WHERE id=$4`, hello.AgentVersion, helloEnvelope.Version, caps, hello.NodeID)
+	_, _ = h.db.Exec(ctx, `UPDATE nodes SET status='healthy',agent_version=$1,protocol_version=$2,capabilities=$3,reality_public_key=NULLIF($4,''),reality_short_id=NULLIF($5,''),last_heartbeat_at=now() WHERE id=$6`, hello.AgentVersion, helloEnvelope.Version, caps, hello.RealityPublicKey, hello.RealityShortID, hello.NodeID)
 	nc := &nodeConnection{socket: c}
 	h.mu.Lock()
 	if old := h.online[hello.NodeID]; old != nil {
@@ -89,6 +95,15 @@ func (h *NodeHub) Connect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func validRealityHello(publicKey, shortID string) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(publicKey)
+	if err != nil || len(decoded) != 32 || len(shortID) == 0 || len(shortID) > 16 || len(shortID)%2 != 0 {
+		return false
+	}
+	_, err = hex.DecodeString(shortID)
+	return err == nil
 }
 func (h *NodeHub) readLoop(ctx context.Context, nodeID string, c *nodeConnection) error {
 	for {

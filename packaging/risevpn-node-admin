@@ -7,7 +7,7 @@ CONFIG=/etc/risevpn/node.conf
 case "${1:-}" in
   logs)
     shift
-    exec journalctl -u risevpn-node.service -u risevpn-hysteria.service "$@"
+    exec journalctl -u risevpn-node.service -u risevpn-hysteria.service -u risevpn-xray.service "$@"
     ;;
   reenroll)
     shift
@@ -19,12 +19,12 @@ case "${1:-}" in
     purge=false
     if [ "${1:-}" = "--purge-data" ]; then purge=true; shift; fi
     [ "$#" -eq 0 ] || { echo "unexpected uninstall arguments" >&2; exit 2; }
-    systemctl disable --now risevpn-hysteria.service risevpn-node.service || true
-    rm -f /etc/systemd/system/risevpn-hysteria.service /etc/systemd/system/risevpn-node.service
-    rm -f /usr/local/bin/risevpn-node /usr/local/lib/risevpn/risevpn-node-bin /usr/local/lib/risevpn/hysteria
+    systemctl disable --now risevpn-xray.service risevpn-hysteria.service risevpn-node.service || true
+    rm -f /etc/systemd/system/risevpn-xray.service /etc/systemd/system/risevpn-hysteria.service /etc/systemd/system/risevpn-node.service
+    rm -f /usr/local/bin/risevpn-node /usr/local/lib/risevpn/risevpn-node-bin /usr/local/lib/risevpn/hysteria /usr/local/lib/risevpn/xray
     systemctl daemon-reload
     if [ "$purge" = true ]; then
-      rm -f /etc/risevpn/node.conf /etc/risevpn/hysteria.yaml /etc/risevpn/domain
+      rm -f /etc/risevpn/node.conf /etc/risevpn/hysteria.yaml /etc/risevpn/xray.json /etc/risevpn/domain
       rm -f /etc/risevpn/tls/fullchain.pem /etc/risevpn/tls/privkey.pem
       rm -f /var/lib/risevpn/node.db /var/lib/risevpn/node.db-shm /var/lib/risevpn/node.db-wal
       echo "RiseVPN configuration and node identity were permanently removed."

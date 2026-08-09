@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -26,6 +29,7 @@ import (
 	"github.com/mirrage11gpt/rmvpn/internal/server"
 	"github.com/mirrage11gpt/rmvpn/internal/store"
 	"github.com/mirrage11gpt/rmvpn/internal/usage"
+	"github.com/mirrage11gpt/rmvpn/internal/xray"
 )
 
 var version = "dev"
@@ -55,13 +59,15 @@ func run(args []string) error {
 	case "version":
 		fmt.Println(version)
 		return nil
+	case "reality-keypair":
+		return realityKeypair(args[1:])
 	default:
 		return usageError()
 	}
 }
 
 func usageError() error {
-	return errors.New("usage: risevpn-node <serve|status|doctor|enrollment|device|version> [options]")
+	return errors.New("usage: risevpn-node <serve|status|doctor|enrollment|device|version|reality-keypair> [options]")
 }
 
 func commonFlags(name string, args []string) (*flag.FlagSet, *string, error) {
@@ -121,14 +127,48 @@ func serve(args []string) error {
 		}
 	}
 	collector := usage.New(database, cfg.TrafficStatsURL, cfg.TrafficStatsSecret)
+	var xrayManager *xray.Manager
+	if cfg.RealityPublicKey != "" && cfg.RealityShortID != "" {
+		if err := database.SetStates(ctx, map[string]string{"reality_public_key": cfg.RealityPublicKey, "reality_short_id": cfg.RealityShortID}); err != nil {
+			return err
+		}
+		xrayManager = xray.New(database, cfg.XrayAPIAddress)
+		go xrayManager.Run(ctx)
+	}
 	go collector.Run(ctx)
-	go control.New(database, complianceService, effectiveVersion(cfg), collector).Run(ctx)
+	if xrayManager != nil {
+		go control.New(database, complianceService, effectiveVersion(cfg), collector, xrayManager).Run(ctx)
+	} else {
+		go control.New(database, complianceService, effectiveVersion(cfg), collector).Run(ctx)
+	}
 	go complianceLoop(ctx, complianceService)
 	slog.Info("RiseVPN node agent started", "version", effectiveVersion(cfg), "internal", cfg.InternalListen)
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return servers.Shutdown(shutdown)
+}
+
+func realityKeypair(args []string) error {
+	flags := flag.NewFlagSet("reality-keypair", flag.ContinueOnError)
+	privatePath := flags.String("private-file", "", "private key output path")
+	publicPath := flags.String("public-file", "", "public key output path")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *privatePath == "" || *publicPath == "" {
+		return errors.New("private-file and public-file are required")
+	}
+	privateKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	privateEncoded := base64.RawURLEncoding.EncodeToString(privateKey.Bytes())
+	publicEncoded := base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
+	if err := os.WriteFile(*privatePath, []byte(privateEncoded+"\n"), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(*publicPath, []byte(publicEncoded+"\n"), 0o600)
 }
 
 func status(args []string) error {

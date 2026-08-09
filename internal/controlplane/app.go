@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mirrage11gpt/rmvpn/internal/vless"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/oauth2"
 )
@@ -681,12 +682,12 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var deviceID, subject, domain, nodeID string
-	var assignedDomain, assignedNodeID *string
+	var assignedDomain, assignedNodeID, assignedRealityPublicKey, assignedRealityShortID *string
 	var cipher, storedHWID []byte
 	var plan, status string
 	var periodEnd *time.Time
 	var termsAccepted bool
-	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain,u.terms_accepted_at IS NOT NULL FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain, &termsAccepted)
+	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain,n.reality_public_key,n.reality_short_id,u.terms_accepted_at IS NOT NULL FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain, &assignedRealityPublicKey, &assignedRealityShortID, &termsAccepted)
 	if err != nil {
 		problem(w, 404, "subscription-token", "Ссылка подписки недействительна", "")
 		return
@@ -740,7 +741,7 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		nodeID = *assignedNodeID
 	}
 	if domain == "" {
-		err = a.db.QueryRow(r.Context(), `SELECT id,domain FROM nodes WHERE status='healthy' AND compliance_fetched_at>now()-interval '6 hours' ORDER BY load_ratio ASC,controller_rtt_ms ASC NULLS LAST LIMIT 1`).Scan(&nodeID, &domain)
+		err = a.db.QueryRow(r.Context(), `SELECT id,domain,reality_public_key,reality_short_id FROM nodes WHERE status='healthy' AND compliance_fetched_at>now()-interval '6 hours' AND reality_public_key IS NOT NULL AND reality_short_id IS NOT NULL ORDER BY load_ratio ASC,controller_rtt_ms ASC NULLS LAST LIMIT 1`).Scan(&nodeID, &domain, &assignedRealityPublicKey, &assignedRealityShortID)
 		if err != nil {
 			problem(w, 503, "no-route", "Сейчас нет доступного маршрута", "Попробуйте обновить подписку позже.")
 			return
@@ -757,10 +758,16 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uri := hysteriaURI(credential, domain, a.config.HysteriaObfsPassword)
+	transport := "hysteria2"
+	if assignedRealityPublicKey != nil && assignedRealityShortID != nil && *assignedRealityPublicKey != "" && *assignedRealityShortID != "" {
+		uri = vlessRealityURI(credential, domain, *assignedRealityPublicKey, *assignedRealityShortID)
+		transport = "vless-reality"
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("profile-title", "RiseVPN · Auto")
 	w.Header().Set("profile-update-interval", "1")
 	w.Header().Set("update-always", "true")
+	w.Header().Set("X-RiseVPN-Transport", transport)
 	if periodEnd != nil {
 		w.Header().Set("subscription-userinfo", "upload=0; download=0; total=0; expire="+strconv.FormatInt(periodEnd.Unix(), 10))
 	}
@@ -776,6 +783,21 @@ func hysteriaURI(credential, domain, obfsPassword string) string {
 		query.Set("obfs-password", obfsPassword)
 	}
 	return "hysteria2://" + url.QueryEscape(credential) + "@" + domain + ":443/?" + query.Encode() + "#RiseVPN-Auto"
+}
+
+func vlessRealityURI(credential, domain, publicKey, shortID string) string {
+	query := url.Values{
+		"encryption": {"none"},
+		"flow":       {"xtls-rprx-vision"},
+		"fp":         {"chrome"},
+		"pbk":        {publicKey},
+		"security":   {"reality"},
+		"sid":        {shortID},
+		"sni":        {domain},
+		"spx":        {"/"},
+		"type":       {"tcp"},
+	}
+	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN-Auto-TCP"
 }
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

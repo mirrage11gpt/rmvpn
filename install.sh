@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-RELEASE_VERSION=0.2.6
+RELEASE_VERSION=0.3.0
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -11,7 +11,7 @@ LOCAL_DIR=
 UPGRADE=false
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.6] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.3.0] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -92,6 +92,7 @@ WORK=$(mktemp -d /tmp/risevpn-install.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT INT TERM
 AGENT=risevpn-node-linux-$ARCH
 HYSTERIA=hysteria-risevpn-linux-$ARCH
+XRAY=xray-risevpn-linux-$ARCH
 PACKAGE=risevpn-node-packaging.tar.gz
 INSTALLER=install.sh
 
@@ -107,6 +108,7 @@ fetch() {
 
 fetch "$AGENT"
 fetch "$HYSTERIA"
+fetch "$XRAY"
 fetch "$PACKAGE"
 fetch "$INSTALLER"
 fetch checksums.txt
@@ -117,7 +119,7 @@ fetch checksums.txt.minisig
   exit 1
 }
 minisign -Vm "$WORK/checksums.txt" -x "$WORK/checksums.txt.minisig" -P "$RELEASE_PUBLIC_KEY"
-for asset in "$AGENT" "$HYSTERIA" "$PACKAGE" "$INSTALLER"; do
+for asset in "$AGENT" "$HYSTERIA" "$XRAY" "$PACKAGE" "$INSTALLER"; do
   expected=$(awk -v file="$asset" '$2 == file || $2 == "*" file {print $1}' "$WORK/checksums.txt")
   [ -n "$expected" ] || { echo "missing checksum for $asset" >&2; exit 1; }
   actual=$(sha256sum "$WORK/$asset" | awk '{print $1}')
@@ -126,13 +128,14 @@ done
 
 mkdir "$WORK/packaging"
 tar -xzf "$WORK/$PACKAGE" -C "$WORK/packaging"
-for required in risevpn-node.service risevpn-hysteria.service hysteria-server.yaml.in risevpn-node-admin risevpn-cert-deploy risevpn-cert-pre risevpn-cert-post; do
+for required in risevpn-node.service risevpn-hysteria.service risevpn-xray.service hysteria-server.yaml.in xray-server.json.in risevpn-node-admin risevpn-cert-deploy risevpn-cert-pre risevpn-cert-post; do
   [ -f "$WORK/packaging/$required" ] || { echo "packaging archive is missing $required" >&2; exit 1; }
 done
 
 getent group risevpn >/dev/null || groupadd --system risevpn
 id risevpn-agent >/dev/null 2>&1 || useradd --system --gid risevpn --home-dir /var/lib/risevpn --shell /usr/sbin/nologin risevpn-agent
 id risevpn-hysteria >/dev/null 2>&1 || useradd --system --gid risevpn --home-dir /nonexistent --shell /usr/sbin/nologin risevpn-hysteria
+id risevpn-xray >/dev/null 2>&1 || useradd --system --gid risevpn --home-dir /nonexistent --shell /usr/sbin/nologin risevpn-xray
 install -d -m 0755 -o root -g root /usr/local/lib/risevpn
 install -d -m 0750 -o root -g risevpn /etc/risevpn /etc/risevpn/tls
 install -d -m 0700 -o risevpn-agent -g risevpn /var/lib/risevpn
@@ -152,17 +155,33 @@ install -m 0755 "$WORK/packaging/risevpn-cert-post" /etc/letsencrypt/renewal-hoo
 
 TRAFFIC_SECRET=$(openssl rand -hex 32)
 OBFS_PASSWORD=${RISEVPN_OBFS_PASSWORD:-}
+REALITY_PRIVATE_KEY=
+REALITY_PUBLIC_KEY=
+REALITY_SHORT_ID=
 if [ -r /etc/risevpn/node.conf ]; then
   old_secret=$(sed -n 's/^traffic_stats_secret=//p' /etc/risevpn/node.conf)
   [ -z "$old_secret" ] || TRAFFIC_SECRET=$old_secret
   old_obfs=$(sed -n 's/^obfs_password=//p' /etc/risevpn/node.conf)
   [ -z "$old_obfs" ] || OBFS_PASSWORD=$old_obfs
+  REALITY_PRIVATE_KEY=$(sed -n 's/^reality_private_key=//p' /etc/risevpn/node.conf)
+  REALITY_PUBLIC_KEY=$(sed -n 's/^reality_public_key=//p' /etc/risevpn/node.conf)
+  REALITY_SHORT_ID=$(sed -n 's/^reality_short_id=//p' /etc/risevpn/node.conf)
 fi
 case "$OBFS_PASSWORD" in *[!A-Za-z0-9._~-]*) echo "RISEVPN_OBFS_PASSWORD contains unsafe characters" >&2; exit 1 ;; esac
 if [ -n "$OBFS_PASSWORD" ] && [ "${#OBFS_PASSWORD}" -lt 4 ]; then
   echo "RISEVPN_OBFS_PASSWORD must contain at least 4 characters" >&2
   exit 1
 fi
+if [ -z "$REALITY_PRIVATE_KEY" ] || [ -z "$REALITY_PUBLIC_KEY" ] || [ -z "$REALITY_SHORT_ID" ]; then
+  chmod 0755 "$WORK/$AGENT"
+  "$WORK/$AGENT" reality-keypair --private-file "$WORK/reality-private" --public-file "$WORK/reality-public"
+  REALITY_PRIVATE_KEY=$(sed -n '1p' "$WORK/reality-private")
+  REALITY_PUBLIC_KEY=$(sed -n '1p' "$WORK/reality-public")
+  REALITY_SHORT_ID=$(openssl rand -hex 8)
+fi
+case "$REALITY_PRIVATE_KEY$REALITY_PUBLIC_KEY" in *[!A-Za-z0-9_-]*) echo "invalid Reality key" >&2; exit 1 ;; esac
+case "$REALITY_SHORT_ID" in *[!A-Fa-f0-9]*) echo "invalid Reality short ID" >&2; exit 1 ;; esac
+[ "${#REALITY_SHORT_ID}" -eq 16 ] || { echo "Reality short ID must contain 16 hexadecimal characters" >&2; exit 1; }
 
 cat > "$WORK/node.conf" <<EOF
 domain=$DOMAIN
@@ -175,6 +194,10 @@ tls_cert_file=/etc/risevpn/tls/fullchain.pem
 tls_key_file=/etc/risevpn/tls/privkey.pem
 traffic_stats_url=http://127.0.0.1:9999
 traffic_stats_secret=$TRAFFIC_SECRET
+xray_api_address=127.0.0.1:10085
+reality_private_key=$REALITY_PRIVATE_KEY
+reality_public_key=$REALITY_PUBLIC_KEY
+reality_short_id=$REALITY_SHORT_ID
 release_public_key=$RELEASE_PUBLIC_KEY
 agent_version=$RELEASE_VERSION
 EOF
@@ -192,7 +215,13 @@ obfs:\\
 " "$WORK/hysteria.yaml"
 fi
 
+sed -e "s|@DOMAIN@|$DOMAIN|g" \
+  -e "s|@REALITY_PRIVATE_KEY@|$REALITY_PRIVATE_KEY|g" \
+  -e "s|@REALITY_SHORT_ID@|$REALITY_SHORT_ID|g" \
+  "$WORK/packaging/xray-server.json.in" > "$WORK/xray.json"
+
 rollback_config=false
+rollback_xray_config=false
 if [ -f /etc/risevpn/node.conf ]; then
   cp -p /etc/risevpn/node.conf "$WORK/node.conf.previous"
   rollback_config=true
@@ -200,14 +229,21 @@ fi
 if [ -f /etc/risevpn/hysteria.yaml ]; then
   cp -p /etc/risevpn/hysteria.yaml "$WORK/hysteria.yaml.previous"
 fi
+if [ -f /etc/risevpn/xray.json ]; then
+  cp -p /etc/risevpn/xray.json "$WORK/xray.json.previous"
+  rollback_xray_config=true
+fi
 install -m 0640 -o root -g risevpn "$WORK/node.conf" /etc/risevpn/node.conf
 install -m 0640 -o root -g risevpn "$WORK/hysteria.yaml" /etc/risevpn/hysteria.yaml
+install -m 0640 -o root -g risevpn "$WORK/xray.json" /etc/risevpn/xray.json
 install -m 0644 "$WORK/packaging/risevpn-node.service" /etc/systemd/system/risevpn-node.service
 install -m 0644 "$WORK/packaging/risevpn-hysteria.service" /etc/systemd/system/risevpn-hysteria.service
+install -m 0644 "$WORK/packaging/risevpn-xray.service" /etc/systemd/system/risevpn-xray.service
 install -m 0755 "$WORK/packaging/risevpn-node-admin" /usr/local/bin/risevpn-node
 install -m 0755 "$WORK/$INSTALLER" /usr/local/lib/risevpn/install.sh
 
 rollback=false
+rollback_xray=false
 if [ -f /usr/local/lib/risevpn/risevpn-node-bin ]; then
   cp -p /usr/local/lib/risevpn/risevpn-node-bin /usr/local/lib/risevpn/risevpn-node-bin.previous
   rollback=true
@@ -215,8 +251,13 @@ fi
 if [ -f /usr/local/lib/risevpn/hysteria ]; then
   cp -p /usr/local/lib/risevpn/hysteria /usr/local/lib/risevpn/hysteria.previous
 fi
+if [ -f /usr/local/lib/risevpn/xray ]; then
+  cp -p /usr/local/lib/risevpn/xray /usr/local/lib/risevpn/xray.previous
+  rollback_xray=true
+fi
 install -m 0755 "$WORK/$AGENT" /usr/local/lib/risevpn/risevpn-node-bin
 install -m 0755 "$WORK/$HYSTERIA" /usr/local/lib/risevpn/hysteria
+install -m 0755 "$WORK/$XRAY" /usr/local/lib/risevpn/xray
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
   ufw allow 80/tcp
@@ -231,16 +272,16 @@ else
 fi
 
 systemctl daemon-reload
-systemctl enable risevpn-node.service risevpn-hysteria.service
+systemctl enable risevpn-node.service risevpn-hysteria.service risevpn-xray.service
 if [ "$UPGRADE" = true ]; then
-  systemctl restart risevpn-node.service risevpn-hysteria.service
+  systemctl restart risevpn-node.service risevpn-hysteria.service risevpn-xray.service
 else
-  systemctl start risevpn-node.service risevpn-hysteria.service
+  systemctl start risevpn-node.service risevpn-hysteria.service risevpn-xray.service
 fi
 
 healthy=false
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
-  if curl --fail --silent http://127.0.0.1:9080/healthz >/dev/null && systemctl is-active --quiet risevpn-hysteria.service; then healthy=true; break; fi
+  if curl --fail --silent http://127.0.0.1:9080/healthz >/dev/null && systemctl is-active --quiet risevpn-hysteria.service && systemctl is-active --quiet risevpn-xray.service; then healthy=true; break; fi
   echo "waiting for services ($attempt/10)" >&2
   sleep 1
 done
@@ -249,13 +290,25 @@ if [ "$healthy" != true ]; then
   if [ "$rollback_config" = true ]; then
     install -m 0640 -o root -g risevpn "$WORK/node.conf.previous" /etc/risevpn/node.conf
     [ ! -f "$WORK/hysteria.yaml.previous" ] || install -m 0640 -o root -g risevpn "$WORK/hysteria.yaml.previous" /etc/risevpn/hysteria.yaml
+    if [ "$rollback_xray_config" = true ]; then
+      install -m 0640 -o root -g risevpn "$WORK/xray.json.previous" /etc/risevpn/xray.json
+    else
+      rm -f /etc/risevpn/xray.json
+    fi
   fi
   if [ "$rollback" = true ]; then
     install -m 0755 /usr/local/lib/risevpn/risevpn-node-bin.previous /usr/local/lib/risevpn/risevpn-node-bin
     [ ! -f /usr/local/lib/risevpn/hysteria.previous ] || install -m 0755 /usr/local/lib/risevpn/hysteria.previous /usr/local/lib/risevpn/hysteria
-    systemctl restart risevpn-node.service risevpn-hysteria.service || true
+    if [ "$rollback_xray" = true ]; then
+      install -m 0755 /usr/local/lib/risevpn/xray.previous /usr/local/lib/risevpn/xray
+      systemctl restart risevpn-node.service risevpn-hysteria.service risevpn-xray.service || true
+    else
+      systemctl disable --now risevpn-xray.service || true
+      rm -f /usr/local/lib/risevpn/xray
+      systemctl restart risevpn-node.service risevpn-hysteria.service || true
+    fi
   else
-    systemctl disable --now risevpn-node.service risevpn-hysteria.service || true
+    systemctl disable --now risevpn-node.service risevpn-hysteria.service risevpn-xray.service || true
   fi
   echo "health check failed; previous binaries were restored when available" >&2
   exit 1
