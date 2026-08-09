@@ -8,6 +8,7 @@ export function installPreviewMocks(){
     const path=url.pathname.slice('/api/v1'.length)
     if(path==='/me')return json({displayName:'Михаил',username:'mirragetag',balanceKopecks:74800,role:'owner',csrfToken:'preview',termsAccepted:true})
     if(path==='/subscription')return json({plan:'PLUS',status:'active',quotaBytes:600e9,usedBytes:184e9})
+    if(path==='/plans')return json({items:[{code:'TRIAL',name:'Trial',priceKopecks:0,deviceLimit:1,quotaBytes:20e9,speedBps:30e6,throttleBps:0,p2pAllowed:false,automaticLocation:true},{code:'LITE',name:'Lite',priceKopecks:14900,deviceLimit:1,quotaBytes:150e9,speedBps:50e6,throttleBps:5e6,p2pAllowed:false,automaticLocation:true},{code:'PLUS',name:'Plus',priceKopecks:29900,deviceLimit:3,quotaBytes:600e9,speedBps:200e6,throttleBps:10e6,p2pAllowed:true,automaticLocation:true},{code:'ULTRA',name:'Ultra',priceKopecks:49900,deviceLimit:7,quotaBytes:2e12,speedBps:0,throttleBps:20e6,p2pAllowed:true,automaticLocation:true}]})
     if(path==='/devices')return json({items:[{id:'d1',slot:1,name:'iPhone 16 Pro',bound:true,lastSeenAt:'2026-08-09T11:42:00Z'},{id:'d2',slot:2,name:'MacBook',bound:false}]})
     if(path==='/admin/mfa')return json({enabled:true,verified:true})
     if(path==='/admin/overview')return json({users:1284,newUsers7d:93,activeSubscriptions:742,graceSubscriptions:12,devices:1198,boundDevices:1047,healthyNodes:9,activeAlerts:2})
@@ -18,6 +19,7 @@ export function installPreviewMocks(){
     if(path==='/admin/alerts')return json({items:[{id:'a1',severity:'critical',message:'Compliance feed не обновлялся более 6 часов',active:true,createdAt:'2026-08-09T06:00:00Z'}]})
     if(path==='/admin/audit')return json({items:[{id:'e1',action:'wallet.adjust',subjectType:'user',subjectId:'u2-4fa19bd3',reason:'Ручное пополнение',createdAt:'2026-08-09T11:20:00Z'}]})
     if(path==='/admin/ledger')return json({items:[{id:'l1',userId:'u2',displayName:'Алексей Воронцов',username:'avvnet',amountKopecks:14900,balanceAfterKopecks:14900,reason:'Ручное пополнение',createdAt:'2026-08-09T11:20:00Z'}]})
+    if(path.startsWith('/admin/wallets/')&&path.endsWith('/adjust'))return json({balanceKopecks:124700})
     return json({title:'Preview endpoint not found'},404)
   }
 }

@@ -652,7 +652,7 @@ func (a *App) changePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	newBalance := balance - cost
 	key := "plan:" + uuid.NewString()
-	_, err = tx.Exec(r.Context(), `UPDATE wallets SET balance_kopecks=$1,updated_at=now() WHERE user_id=$2;UPDATE subscriptions SET plan_code=$3,pending_plan_code=NULL,status='active',period_started_at=$4,period_ends_at=$5,grace_ends_at=NULL,quota_bytes=$6 WHERE user_id=$2`, newBalance, s.UserID, body.Plan, periodStart, periodEnd, quota)
+	_, err = tx.Exec(r.Context(), `UPDATE wallets SET balance_kopecks=$1,updated_at=now() WHERE user_id=$2;UPDATE subscriptions SET plan_code=$3,pending_plan_code=NULL,status='active',period_started_at=$4,period_ends_at=$5,grace_ends_at=NULL,quota_bytes=$6,used_bytes=CASE WHEN $7='TRIAL' THEN 0 ELSE used_bytes END WHERE user_id=$2`, newBalance, s.UserID, body.Plan, periodStart, periodEnd, quota, currentCode)
 	if err == nil {
 		_, err = tx.Exec(r.Context(), `INSERT INTO ledger_entries(user_id,amount_kopecks,balance_after_kopecks,reason,actor_user_id,idempotency_key) VALUES($1,$2,$3,$4,$1,$5)`, s.UserID, -cost, newBalance, "Смена тарифа "+currentCode+" → "+body.Plan, key)
 	}
@@ -666,7 +666,38 @@ func (a *App) changePlan(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "billing", "Смена тарифа не выполнена", "")
 		return
 	}
+	if err := a.provisionUserDevices(r.Context(), s.UserID); err != nil {
+		slog.Warn("failed to apply purchased plan to devices", "userId", s.UserID, "error", err)
+	}
 	jsonResponse(w, 200, map[string]any{"plan": body.Plan, "chargedKopecks": cost, "balanceKopecks": newBalance, "quotaBytes": quota, "periodEndsAt": periodEnd})
+}
+
+func (a *App) provisionUserDevices(ctx context.Context, userID string) error {
+	rows, err := a.db.Query(ctx, `SELECT d.id::text,a.node_id::text FROM devices d JOIN node_assignments a ON a.device_id=d.id WHERE d.user_id=$1 AND d.revoked_at IS NULL`, userID)
+	if err != nil {
+		return err
+	}
+	type assignment struct{ deviceID, nodeID string }
+	var items []assignment
+	for rows.Next() {
+		var item assignment
+		if err := rows.Scan(&item.deviceID, &item.nodeID); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, item := range items {
+		if err := a.provisionDevice(ctx, item.deviceID, item.nodeID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) network(w http.ResponseWriter, r *http.Request) {
@@ -805,7 +836,7 @@ func vlessWebSocketURI(credential, domain string) string {
 	query := url.Values{
 		"alpn":       {"http/1.1"},
 		"encryption": {"none"},
-		"fp":         {"randomized"},
+		"fp":         {"chrome"},
 		"host":       {domain},
 		"path":       {"/risevpn-v1"},
 		"security":   {"tls"},
