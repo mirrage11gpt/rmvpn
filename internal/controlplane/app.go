@@ -529,8 +529,14 @@ func (a *App) deviceSubscription(w http.ResponseWriter, r *http.Request) {
 func (a *App) rebindDevice(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)
 	id := chi.URLParam(r, "id")
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		problem(w, 500, "db", "Не удалось перепривязать устройство", "")
+		return
+	}
+	defer tx.Rollback(r.Context())
 	var last *time.Time
-	err := a.db.QueryRow(r.Context(), `SELECT last_bound_at FROM devices WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL`, id, s.UserID).Scan(&last)
+	err = tx.QueryRow(r.Context(), `SELECT last_bound_at FROM devices WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL FOR UPDATE`, id, s.UserID).Scan(&last)
 	if err != nil {
 		problem(w, 404, "device", "Устройство не найдено", "")
 		return
@@ -541,7 +547,16 @@ func (a *App) rebindDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	credential, _ := RandomToken(32)
 	ciphertext, _ := a.vault.Encrypt(credential, []byte(id))
-	_, err = a.db.Exec(r.Context(), `UPDATE devices SET credential_ciphertext=$1,credential_hash=$2,hwid_hmac=NULL,last_bound_at=NULL WHERE id=$3`, ciphertext, Hash(credential), id)
+	_, err = tx.Exec(r.Context(), `UPDATE devices SET credential_ciphertext=$1,credential_hash=$2,hwid_hmac=NULL,last_bound_at=NULL WHERE id=$3`, ciphertext, Hash(credential), id)
+	if err == nil {
+		_, err = tx.Exec(r.Context(), `DELETE FROM quota_leases WHERE device_id=$1`, id)
+	}
+	if err == nil {
+		_, err = tx.Exec(r.Context(), `UPDATE node_assignments SET provisioned_at=NULL,updated_at=now() WHERE device_id=$1`, id)
+	}
+	if err == nil {
+		err = tx.Commit(r.Context())
+	}
 	if err != nil {
 		problem(w, 500, "db", "Не удалось перепривязать устройство", "")
 		return
@@ -684,13 +699,13 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 	if len(storedHWID) == 0 {
 		tx, _ := a.db.Begin(r.Context())
 		defer tx.Rollback(r.Context())
-		var reused bool
-		_ = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM trial_fingerprints WHERE telegram_subject=$1 OR hwid_hmac=$2)`, subject, fingerprint).Scan(&reused)
-		if plan == "TRIAL" && reused {
-			problem(w, 409, "trial-used", "Trial уже использован", "Выберите платный тариф.")
-			return
-		}
-		if plan == "TRIAL" {
+		if plan == "TRIAL" && status == "pending_trial" {
+			var reused bool
+			_ = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM trial_fingerprints WHERE telegram_subject=$1 OR hwid_hmac=$2)`, subject, fingerprint).Scan(&reused)
+			if reused {
+				problem(w, 409, "trial-used", "Trial уже использован", "Выберите платный тариф.")
+				return
+			}
 			now := time.Now().UTC()
 			trialEnd := now.Add(trialDuration)
 			_, err = tx.Exec(r.Context(), `UPDATE subscriptions SET status='active',period_started_at=$1,period_ends_at=$2,quota_bytes=20000000000 WHERE user_id=(SELECT user_id FROM devices WHERE id=$3) AND status='pending_trial'`, now, trialEnd, deviceID)
