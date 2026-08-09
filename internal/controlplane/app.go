@@ -617,7 +617,38 @@ func (a *App) changePlan(w http.ResponseWriter, r *http.Request) {
 		problem(w, 400, "plan", "Тариф не найден", "")
 		return
 	}
-	if next.PriceKopecks <= current.PriceKopecks && status == "active" {
+	now := time.Now().UTC()
+	if body.Plan == currentCode && currentCode != "TRIAL" && status == "active" {
+		if balance < next.PriceKopecks {
+			problem(w, 409, "balance", "Недостаточно средств", "Для продления нужен полный размер абонентской платы.")
+			return
+		}
+		periodEnd := now
+		if ends != nil && ends.After(now) {
+			periodEnd = *ends
+		}
+		periodEnd = periodEnd.Add(next.Duration)
+		newBalance := balance - next.PriceKopecks
+		newQuota := currentQuota + next.QuotaBytes
+		key := "plan-renewal:" + uuid.NewString()
+		_, err = tx.Exec(r.Context(), `UPDATE wallets SET balance_kopecks=$1,updated_at=now() WHERE user_id=$2;UPDATE subscriptions SET pending_plan_code=NULL,status='active',period_ends_at=$3,grace_ends_at=NULL,quota_bytes=$4 WHERE user_id=$2`, newBalance, s.UserID, periodEnd, newQuota)
+		if err == nil {
+			_, err = tx.Exec(r.Context(), `INSERT INTO ledger_entries(user_id,amount_kopecks,balance_after_kopecks,reason,actor_user_id,idempotency_key) VALUES($1,$2,$3,$4,$1,$5)`, s.UserID, -next.PriceKopecks, newBalance, "Продление тарифа "+currentCode, key)
+		}
+		if err == nil {
+			_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_user_id,action,subject_type,subject_id,reason,data) VALUES($1,'subscription.renew','subscription',$1,'user request',jsonb_build_object('plan',$2,'costKopecks',$3,'quotaBytes',$4,'periodEndsAt',$5))`, s.UserID, currentCode, next.PriceKopecks, newQuota, periodEnd)
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		if err != nil {
+			problem(w, 500, "billing", "Продление тарифа не выполнено", "")
+			return
+		}
+		jsonResponse(w, 200, map[string]any{"action": "renewed", "plan": currentCode, "chargedKopecks": next.PriceKopecks, "balanceKopecks": newBalance, "quotaBytes": newQuota, "periodEndsAt": periodEnd})
+		return
+	}
+	if next.PriceKopecks < current.PriceKopecks && status == "active" {
 		_, err = tx.Exec(r.Context(), `UPDATE subscriptions SET pending_plan_code=$1 WHERE user_id=$2`, body.Plan, s.UserID)
 		if err == nil {
 			_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_user_id,action,subject_type,subject_id,reason,data) VALUES($1,'subscription.downgrade','subscription',$2,'user request',jsonb_build_object('from',$3,'to',$4))`, s.UserID, s.UserID, currentCode, body.Plan)
@@ -632,7 +663,6 @@ func (a *App) changePlan(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 202, map[string]any{"plan": currentCode, "pendingPlan": body.Plan, "appliesAt": ends})
 		return
 	}
-	now := time.Now().UTC()
 	cost := next.PriceKopecks
 	quota := next.QuotaBytes
 	periodStart := now
@@ -669,7 +699,7 @@ func (a *App) changePlan(w http.ResponseWriter, r *http.Request) {
 	if err := a.provisionUserDevices(r.Context(), s.UserID); err != nil {
 		slog.Warn("failed to apply purchased plan to devices", "userId", s.UserID, "error", err)
 	}
-	jsonResponse(w, 200, map[string]any{"plan": body.Plan, "chargedKopecks": cost, "balanceKopecks": newBalance, "quotaBytes": quota, "periodEndsAt": periodEnd})
+	jsonResponse(w, 200, map[string]any{"action": "upgraded", "plan": body.Plan, "chargedKopecks": cost, "balanceKopecks": newBalance, "quotaBytes": quota, "periodEndsAt": periodEnd})
 }
 
 func (a *App) provisionUserDevices(ctx context.Context, userID string) error {
@@ -779,6 +809,7 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		problem(w, 409, "hwid-mismatch", "Подписка привязана к другому устройству", "Запустите перепривязку в кабинете.")
 		return
 	}
+	_, _ = a.db.Exec(r.Context(), `UPDATE devices SET last_seen_at=now() WHERE id=$1`, deviceID)
 	if status != "active" && status != "grace" {
 		problem(w, 403, "subscription-inactive", "Подписка не активна", "")
 		return
@@ -843,7 +874,7 @@ func vlessWebSocketURI(credential, domain string) string {
 		"sni":        {domain},
 		"type":       {"ws"},
 	}
-	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN · Защищённый маршрут"
+	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN · Chrome TLS"
 }
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

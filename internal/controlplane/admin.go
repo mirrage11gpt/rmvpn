@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -193,6 +194,7 @@ func (a *App) adjustWallet(w http.ResponseWriter, r *http.Request) {
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {
+		slog.Error("wallet adjustment failed", "actorUserId", s.UserID, "userId", userID, "amountKopecks", body.AmountKopecks, "error", err)
 		problem(w, 500, "ledger", "Баланс не изменён", "")
 		return
 	}
@@ -390,6 +392,7 @@ func (a *App) creditWallet(w http.ResponseWriter, r *http.Request) {
 		err = tx.Commit(r.Context())
 	}
 	if err != nil {
+		slog.Error("wallet credit failed", "actorUserId", s.UserID, "userId", userID, "amountKopecks", body.AmountKopecks, "error", err)
 		problem(w, 409, "ledger", "Начисление не выполнено", "Проверьте ключ идемпотентности.")
 		return
 	}

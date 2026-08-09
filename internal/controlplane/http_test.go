@@ -87,7 +87,7 @@ func TestVLESSWebSocketURI(t *testing.T) {
 			t.Fatalf("unexpected %s: %q", key, query.Get(key))
 		}
 	}
-	if parsed.Fragment != "RiseVPN · Защищённый маршрут" {
+	if parsed.Fragment != "RiseVPN · Chrome TLS" {
 		t.Fatalf("unexpected fragment: %q", parsed.Fragment)
 	}
 }
