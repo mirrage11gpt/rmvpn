@@ -8,4 +8,12 @@ import '@fontsource/manrope/700.css'
 import './styles.css'
 import App from './App'
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><App/></BrowserRouter></React.StrictMode>)
+async function start(){
+  if(import.meta.env.DEV&&new URLSearchParams(location.search).has('preview')){
+    const {installPreviewMocks}=await import('./previewMocks')
+    installPreviewMocks()
+  }
+  ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><BrowserRouter><App/></BrowserRouter></React.StrictMode>)
+}
+
+void start()

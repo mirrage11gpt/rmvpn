@@ -121,9 +121,17 @@ func (a *App) Handler() http.Handler {
 			private.Route("/admin", func(admin chi.Router) {
 				admin.Use(a.requireRole("owner", "operator", "support", "auditor"))
 				admin.Get("/overview", a.adminOverview)
-				admin.Get("/nodes", a.adminNodes)
-				admin.Get("/alerts", a.adminAlerts)
-				admin.Get("/audit", a.adminAudit)
+				admin.Get("/statistics", a.adminStatistics)
+				admin.Get("/users", a.requireRole("owner", "support")(http.HandlerFunc(a.adminUsers)).ServeHTTP)
+				admin.Patch("/users/{userID}/status", a.requireRole("owner", "support")(http.HandlerFunc(a.updateUserStatus)).ServeHTTP)
+				admin.Post("/wallets/{userID}/adjust", a.requireRole("owner", "support")(http.HandlerFunc(a.adjustWallet)).ServeHTTP)
+				admin.Get("/admins", a.requireRole("owner")(http.HandlerFunc(a.admins)).ServeHTTP)
+				admin.Put("/admins/{userID}/role", a.requireRole("owner")(http.HandlerFunc(a.setAdminRole)).ServeHTTP)
+				admin.Delete("/admins/{userID}/role", a.requireRole("owner")(http.HandlerFunc(a.removeAdminRole)).ServeHTTP)
+				admin.Get("/nodes", a.requireRole("owner", "operator")(http.HandlerFunc(a.adminNodes)).ServeHTTP)
+				admin.Get("/alerts", a.requireRole("owner", "operator")(http.HandlerFunc(a.adminAlerts)).ServeHTTP)
+				admin.Get("/audit", a.requireRole("owner", "auditor")(http.HandlerFunc(a.adminAudit)).ServeHTTP)
+				admin.Get("/ledger", a.requireRole("owner", "support", "auditor")(http.HandlerFunc(a.adminLedger)).ServeHTTP)
 				admin.Post("/nodes/enroll", a.requireRole("owner", "operator")(http.HandlerFunc(a.enrollNode)).ServeHTTP)
 				admin.Post("/wallets/{userID}/credit", a.requireRole("owner", "support")(http.HandlerFunc(a.creditWallet)).ServeHTTP)
 				admin.Post("/nodes/{nodeID}/commands", a.requireRole("owner", "operator")(http.HandlerFunc(a.enqueueCommand)).ServeHTTP)
@@ -186,6 +194,11 @@ func (a *App) requireSession(next http.Handler) http.Handler {
 			problem(w, 401, "unauthorized", "Нужен вход", "Войдите через Telegram.")
 			return
 		}
+		var active bool
+		if err = a.db.QueryRow(r.Context(), `SELECT status='active' FROM users WHERE id=$1`, s.UserID).Scan(&active); err != nil || !active {
+			problem(w, 401, "account-blocked", "Доступ к аккаунту ограничен", "Обратитесь в поддержку RiseVPN.")
+			return
+		}
 		if r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" && r.Header.Get("X-CSRF-Token") != s.CSRF {
 			problem(w, 403, "csrf", "Проверка запроса не пройдена", "Обновите страницу и повторите действие.")
 			return
@@ -197,8 +210,10 @@ func (a *App) requireRole(roles ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			s, _ := r.Context().Value(sessionKey{}).(session)
+			var currentRole string
+			_ = a.db.QueryRow(r.Context(), `SELECT COALESCE((SELECT role FROM user_roles WHERE user_id=$1 ORDER BY CASE role WHEN 'owner' THEN 1 WHEN 'operator' THEN 2 WHEN 'support' THEN 3 ELSE 4 END LIMIT 1),'')`, s.UserID).Scan(&currentRole)
 			for _, role := range roles {
-				if s.Role == role {
+				if currentRole == role {
 					if !s.AdminMFA && !a.config.DevAuth {
 						problem(w, 403, "mfa-required", "Требуется второй фактор", "Подтвердите вход одноразовым кодом TOTP.")
 						return
@@ -396,22 +411,22 @@ func (a *App) plans(w http.ResponseWriter, r *http.Request) {
 func currentSession(r *http.Request) session { return r.Context().Value(sessionKey{}).(session) }
 func (a *App) me(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)
-	var name, username, status string
+	var name, username, status, role string
 	var balance int64
 	var termsAccepted bool
-	err := a.db.QueryRow(r.Context(), `SELECT u.display_name,COALESCE(u.username,''),u.status,w.balance_kopecks,u.terms_accepted_at IS NOT NULL FROM users u JOIN wallets w ON w.user_id=u.id WHERE u.id=$1`, s.UserID).Scan(&name, &username, &status, &balance, &termsAccepted)
+	err := a.db.QueryRow(r.Context(), `SELECT u.display_name,COALESCE(u.username,''),u.status,w.balance_kopecks,COALESCE(u.terms_version,'')=$2,COALESCE((SELECT role FROM user_roles WHERE user_id=u.id ORDER BY CASE role WHEN 'owner' THEN 1 WHEN 'operator' THEN 2 WHEN 'support' THEN 3 ELSE 4 END LIMIT 1),'') FROM users u JOIN wallets w ON w.user_id=u.id WHERE u.id=$1`, s.UserID, currentTermsVersion).Scan(&name, &username, &status, &balance, &termsAccepted, &role)
 	if err != nil {
 		problem(w, 404, "user", "Пользователь не найден", "")
 		return
 	}
-	jsonResponse(w, 200, map[string]any{"id": s.UserID, "displayName": name, "username": username, "status": status, "balanceKopecks": balance, "role": s.Role, "csrfToken": s.CSRF, "termsAccepted": termsAccepted})
+	jsonResponse(w, 200, map[string]any{"id": s.UserID, "displayName": name, "username": username, "status": status, "balanceKopecks": balance, "role": role, "csrfToken": s.CSRF, "termsAccepted": termsAccepted})
 }
 
-const currentTermsVersion = "2026-08-09"
+const currentTermsVersion = "2026-08-09.2"
 
 func (a *App) acceptTerms(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)
-	if _, err := a.db.Exec(r.Context(), `UPDATE users SET terms_accepted_at=COALESCE(terms_accepted_at,now()),terms_version=$1 WHERE id=$2`, currentTermsVersion, s.UserID); err != nil {
+	if _, err := a.db.Exec(r.Context(), `UPDATE users SET terms_accepted_at=now(),terms_version=$1 WHERE id=$2`, currentTermsVersion, s.UserID); err != nil {
 		problem(w, 500, "terms", "Не удалось сохранить согласие", "Попробуйте ещё раз.")
 		return
 	}
@@ -421,7 +436,7 @@ func (a *App) acceptTerms(w http.ResponseWriter, r *http.Request) {
 func (a *App) requireTerms(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var accepted bool
-		if err := a.db.QueryRow(r.Context(), `SELECT terms_accepted_at IS NOT NULL FROM users WHERE id=$1`, currentSession(r).UserID).Scan(&accepted); err != nil || !accepted {
+		if err := a.db.QueryRow(r.Context(), `SELECT COALESCE(terms_version,'')=$2 FROM users WHERE id=$1`, currentSession(r).UserID, currentTermsVersion).Scan(&accepted); err != nil || !accepted {
 			problem(w, http.StatusPreconditionRequired, "terms-required", "Примите соглашение", "После этого откроются устройства и подписка.")
 			return
 		}
@@ -685,9 +700,10 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 	var assignedDomain, assignedNodeID *string
 	var cipher, storedHWID []byte
 	var plan, status string
+	var quotaBytes, usedBytes int64
 	var periodEnd *time.Time
 	var termsAccepted, supportsCDNWebSocket bool
-	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,n.id::text,n.domain,COALESCE(n.capabilities @> '["fallback.vless-ws-tls"]'::jsonb,false),u.terms_accepted_at IS NOT NULL FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL`, Hash(token)).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &assignedNodeID, &assignedDomain, &supportsCDNWebSocket, &termsAccepted)
+	err := a.db.QueryRow(r.Context(), `SELECT d.id,u.telegram_subject,d.credential_ciphertext,d.hwid_hmac,s.plan_code,s.status,s.period_ends_at,s.quota_bytes,s.used_bytes,n.id::text,n.domain,COALESCE(n.capabilities @> '["fallback.vless-ws-tls"]'::jsonb,false),COALESCE(u.terms_version,'')=$2 FROM devices d JOIN users u ON u.id=d.user_id JOIN subscriptions s ON s.user_id=d.user_id LEFT JOIN node_assignments a ON a.device_id=d.id LEFT JOIN nodes n ON n.id=a.node_id WHERE d.subscription_token_hash=$1 AND d.revoked_at IS NULL AND u.status='active'`, Hash(token), currentTermsVersion).Scan(&deviceID, &subject, &cipher, &storedHWID, &plan, &status, &periodEnd, &quotaBytes, &usedBytes, &assignedNodeID, &assignedDomain, &supportsCDNWebSocket, &termsAccepted)
 	if err != nil {
 		problem(w, 404, "subscription-token", "Ссылка подписки недействительна", "")
 		return
@@ -764,12 +780,12 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		transport = "vless-ws-tls"
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("profile-title", "RiseVPN · Auto")
+	w.Header().Set("profile-title", "RiseVPN")
 	w.Header().Set("profile-update-interval", "1")
 	w.Header().Set("update-always", "true")
 	w.Header().Set("X-RiseVPN-Transport", transport)
 	if periodEnd != nil {
-		w.Header().Set("subscription-userinfo", "upload=0; download=0; total=0; expire="+strconv.FormatInt(periodEnd.Unix(), 10))
+		w.Header().Set("subscription-userinfo", "upload=0; download="+strconv.FormatInt(usedBytes, 10)+"; total="+strconv.FormatInt(quotaBytes, 10)+"; expire="+strconv.FormatInt(periodEnd.Unix(), 10))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(uri + "\n"))
@@ -782,7 +798,7 @@ func hysteriaURI(credential, domain, obfsPassword string) string {
 		query.Set("obfs", "salamander")
 		query.Set("obfs-password", obfsPassword)
 	}
-	return "hysteria2://" + url.QueryEscape(credential) + "@" + domain + ":443/?" + query.Encode() + "#RiseVPN-Auto"
+	return "hysteria2://" + url.QueryEscape(credential) + "@" + domain + ":443/?" + query.Encode() + "#RiseVPN · Защищённый маршрут"
 }
 
 func vlessWebSocketURI(credential, domain string) string {
@@ -796,7 +812,7 @@ func vlessWebSocketURI(credential, domain string) string {
 		"sni":        {domain},
 		"type":       {"ws"},
 	}
-	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN-Auto-CDN"
+	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN · Защищённый маршрут"
 }
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

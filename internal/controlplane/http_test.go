@@ -51,7 +51,7 @@ func TestHysteriaURIWithSalamander(t *testing.T) {
 	if query.Get("obfs") != "salamander" || query.Get("obfs-password") != "obfs secret" {
 		t.Fatalf("unexpected obfuscation parameters: %v", query)
 	}
-	if parsed.Fragment != "RiseVPN-Auto" {
+	if parsed.Fragment != "RiseVPN · Защищённый маршрут" {
 		t.Fatalf("unexpected fragment: %q", parsed.Fragment)
 	}
 }
@@ -86,5 +86,8 @@ func TestVLESSWebSocketURI(t *testing.T) {
 		if query.Get(key) != expected {
 			t.Fatalf("unexpected %s: %q", key, query.Get(key))
 		}
+	}
+	if parsed.Fragment != "RiseVPN · Защищённый маршрут" {
+		t.Fatalf("unexpected fragment: %q", parsed.Fragment)
 	}
 }
