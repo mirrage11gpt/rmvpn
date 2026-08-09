@@ -48,8 +48,12 @@ func (a *App) provisionDevice(ctx context.Context, deviceID, nodeID string) erro
 	}
 	var active int64
 	_ = tx.QueryRow(ctx, `SELECT COALESCE(sum(bytes-consumed_bytes),0) FROM quota_leases WHERE device_id=$1 AND expires_at>now()`, deviceID).Scan(&active)
+	upsert, _ := json.Marshal(protocol.DeviceUpsert{DeviceID: deviceID, CredentialHash: base64.RawURLEncoding.EncodeToString(credentialHash), Plan: plan, Active: true, SubscriptionEnds: valueTime(subscriptionEnds), PeriodEnds: valueTime(periodEnds), QuotaBytes: quota})
 	if active > 0 {
-		return nil
+		if _, err = tx.Exec(ctx, `INSERT INTO node_commands(node_id,type,payload,expires_at) VALUES($1,'device.upsert',$2,now()+interval '24 hours')`, nodeID, upsert); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
 	}
 	grant := reservableBytes(quota-used, active, 1_000_000_000)
 	if grant == 0 {
@@ -65,7 +69,6 @@ func (a *App) provisionDevice(ctx context.Context, deviceID, nodeID string) erro
 	if err != nil {
 		return err
 	}
-	upsert, _ := json.Marshal(protocol.DeviceUpsert{DeviceID: deviceID, CredentialHash: base64.RawURLEncoding.EncodeToString(credentialHash), Plan: plan, Active: true, SubscriptionEnds: valueTime(subscriptionEnds), PeriodEnds: valueTime(periodEnds), QuotaBytes: quota})
 	leaseJSON, _ := json.Marshal(lease)
 	_, err = tx.Exec(ctx, `INSERT INTO node_commands(node_id,type,payload,expires_at) VALUES($1,'device.upsert',$2,now()+interval '24 hours'),($1,'quota.lease',$3,now()+interval '24 hours')`, nodeID, upsert, leaseJSON)
 	if err != nil {

@@ -73,6 +73,7 @@ func (h *NodeHub) Connect(w http.ResponseWriter, r *http.Request) {
 	}
 	h.online[hello.NodeID] = nc
 	h.mu.Unlock()
+	_ = h.queueDeviceResync(ctx, hello.NodeID)
 	defer func() {
 		h.mu.Lock()
 		if h.online[hello.NodeID] == nc {
@@ -95,6 +96,36 @@ func (h *NodeHub) Connect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func (h *NodeHub) queueDeviceResync(ctx context.Context, nodeID string) error {
+	rows, err := h.db.Query(ctx, `SELECT d.id::text,d.credential_hash,s.plan_code,s.period_ends_at,s.quota_bytes
+		FROM node_assignments a
+		JOIN devices d ON d.id=a.device_id
+		JOIN subscriptions s ON s.user_id=d.user_id
+		JOIN users u ON u.id=d.user_id
+		WHERE a.node_id=$1 AND d.revoked_at IS NULL AND u.status='active' AND s.status IN ('active','grace')`, nodeID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var deviceID, plan string
+		var credentialHash []byte
+		var periodEnd *time.Time
+		var quota int64
+		if err := rows.Scan(&deviceID, &credentialHash, &plan, &periodEnd, &quota); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(protocol.DeviceUpsert{
+			DeviceID: deviceID, CredentialHash: base64.RawURLEncoding.EncodeToString(credentialHash),
+			Plan: plan, Active: true, SubscriptionEnds: valueTime(periodEnd), PeriodEnds: valueTime(periodEnd), QuotaBytes: quota,
+		})
+		if _, err := h.db.Exec(ctx, `INSERT INTO node_commands(node_id,type,payload,expires_at) VALUES($1,'device.upsert',$2,now()+interval '24 hours')`, nodeID, payload); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
 
 func validRealityHello(publicKey, shortID string) bool {
