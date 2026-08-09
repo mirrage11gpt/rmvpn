@@ -842,7 +842,7 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		transport = "vless-ws-tls"
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("profile-title", "RiseVPN")
+	w.Header().Set("profile-title", "RiseVPN · Chrome TLS")
 	w.Header().Set("profile-update-interval", "1")
 	w.Header().Set("update-always", "true")
 	w.Header().Set("X-RiseVPN-Transport", transport)

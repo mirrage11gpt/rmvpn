@@ -188,7 +188,7 @@ func (a *App) adjustWallet(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO ledger_entries(user_id,amount_kopecks,balance_after_kopecks,reason,actor_user_id,idempotency_key) VALUES($1,$2,$3,$4,$5,$6)`, userID, body.AmountKopecks, updated, reason, s.UserID, key)
 	}
 	if err == nil {
-		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_user_id,action,subject_type,subject_id,reason,data) VALUES($1,'wallet.adjust','user',$2,$3,jsonb_build_object('amountKopecks',$4,'balanceAfterKopecks',$5))`, s.UserID, userID, reason, body.AmountKopecks, updated)
+		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_user_id,action,subject_type,subject_id,reason,data) VALUES($1,'wallet.adjust','user',$2,$3,jsonb_build_object('amountKopecks',$4::bigint,'balanceAfterKopecks',$5::bigint))`, s.UserID, userID, reason, body.AmountKopecks, updated)
 	}
 	if err == nil {
 		err = tx.Commit(r.Context())
@@ -386,7 +386,7 @@ func (a *App) creditWallet(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.Exec(r.Context(), `INSERT INTO ledger_entries(user_id,amount_kopecks,balance_after_kopecks,reason,actor_user_id,idempotency_key) VALUES($1,$2,$3,$4,$5,$6)`, userID, body.AmountKopecks, balance, strings.TrimSpace(body.Reason), s.UserID, body.IdempotencyKey)
 	}
 	if err == nil {
-		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_user_id,action,subject_type,subject_id,reason,data) VALUES($1,'wallet.credit','user',$2,$3,jsonb_build_object('amountKopecks',$4,'balanceAfterKopecks',$5))`, s.UserID, userID, strings.TrimSpace(body.Reason), body.AmountKopecks, balance)
+		_, err = tx.Exec(r.Context(), `INSERT INTO audit_events(actor_user_id,action,subject_type,subject_id,reason,data) VALUES($1,'wallet.credit','user',$2,$3,jsonb_build_object('amountKopecks',$4::bigint,'balanceAfterKopecks',$5::bigint))`, s.UserID, userID, strings.TrimSpace(body.Reason), body.AmountKopecks, balance)
 	}
 	if err == nil {
 		err = tx.Commit(r.Context())
