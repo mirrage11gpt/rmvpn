@@ -864,6 +864,7 @@ func hysteriaURI(credential, domain, obfsPassword string) string {
 }
 
 func vlessWebSocketURI(credential, domain string) string {
+	id := vless.IDFromCredential(credential)
 	query := url.Values{
 		"alpn":       {"http/1.1"},
 		"encryption": {"none"},
@@ -874,7 +875,8 @@ func vlessWebSocketURI(credential, domain string) string {
 		"sni":        {domain},
 		"type":       {"ws"},
 	}
-	return "vless://" + vless.IDFromCredential(credential) + "@" + domain + ":443?" + query.Encode() + "#RiseVPN · Chrome TLS"
+	label := "RiseVPN · " + strings.ToUpper(id[:8]) + " · Chrome TLS"
+	return "vless://" + id + "@" + domain + ":443?" + query.Encode() + "#" + url.PathEscape(label)
 }
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

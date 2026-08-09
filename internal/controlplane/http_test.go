@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -87,7 +88,7 @@ func TestVLESSWebSocketURI(t *testing.T) {
 			t.Fatalf("unexpected %s: %q", key, query.Get(key))
 		}
 	}
-	if parsed.Fragment != "RiseVPN · Chrome TLS" {
+	if parsed.Fragment != "RiseVPN · "+strings.ToUpper(parsed.User.Username()[:8])+" · Chrome TLS" {
 		t.Fatalf("unexpected fragment: %q", parsed.Fragment)
 	}
 }
