@@ -25,6 +25,7 @@ type Config struct {
 	QuotaPrivateKey      []byte
 	CompliancePrivateKey []byte
 	ComplianceURL        string
+	HysteriaObfsPassword string
 	NodeCACertFile       string
 	NodeCAKeyFile        string
 	DevAuth              bool
@@ -39,11 +40,12 @@ func LoadConfig() (Config, error) {
 		DatabaseURL:   os.Getenv("DATABASE_URL"), RedisURL: os.Getenv("REDIS_URL"),
 		TelegramIssuer:   env("TELEGRAM_OIDC_ISSUER", "https://oauth.telegram.org"),
 		TelegramClientID: os.Getenv("TELEGRAM_CLIENT_ID"), TelegramSecret: os.Getenv("TELEGRAM_CLIENT_SECRET"),
-		TelegramBotToken: os.Getenv("TELEGRAM_BOT_TOKEN"),
-		ComplianceURL:    env("COMPLIANCE_URL", "https://antifilter.download/list/domains.lst"),
-		NodeCACertFile:   env("NODE_CA_CERT_FILE", "/run/secrets/node_ca.pem"),
-		NodeCAKeyFile:    env("NODE_CA_KEY_FILE", "/run/secrets/node_ca.key"),
-		DevAuth:          envBool("RISEVPN_DEV_AUTH"), DevTelegramSubject: env("RISEVPN_DEV_TELEGRAM_SUBJECT", "dev-owner"),
+		TelegramBotToken:     os.Getenv("TELEGRAM_BOT_TOKEN"),
+		ComplianceURL:        env("COMPLIANCE_URL", "https://antifilter.download/list/domains.lst"),
+		HysteriaObfsPassword: strings.TrimSpace(os.Getenv("HYSTERIA_OBFS_PASSWORD")),
+		NodeCACertFile:       env("NODE_CA_CERT_FILE", "/run/secrets/node_ca.pem"),
+		NodeCAKeyFile:        env("NODE_CA_KEY_FILE", "/run/secrets/node_ca.key"),
+		DevAuth:              envBool("RISEVPN_DEV_AUTH"), DevTelegramSubject: env("RISEVPN_DEV_TELEGRAM_SUBJECT", "dev-owner"),
 	}
 	var err error
 	if c.SessionSecret, err = secret("SESSION_SECRET", 32, c.DevAuth); err != nil {

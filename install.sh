@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-RELEASE_VERSION=0.2.3
+RELEASE_VERSION=0.2.4
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -11,7 +11,7 @@ LOCAL_DIR=
 UPGRADE=false
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.3] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.4] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -138,9 +138,12 @@ install -m 0755 "$WORK/packaging/risevpn-cert-post" /etc/letsencrypt/renewal-hoo
 /etc/letsencrypt/renewal-hooks/deploy/risevpn-node
 
 TRAFFIC_SECRET=$(openssl rand -hex 32)
+OBFS_PASSWORD=$(openssl rand -hex 32)
 if [ -r /etc/risevpn/node.conf ]; then
   old_secret=$(sed -n 's/^traffic_stats_secret=//p' /etc/risevpn/node.conf)
   [ -z "$old_secret" ] || TRAFFIC_SECRET=$old_secret
+  old_obfs=$(sed -n 's/^obfs_password=//p' /etc/risevpn/node.conf)
+  [ -z "$old_obfs" ] || OBFS_PASSWORD=$old_obfs
 fi
 
 cat > "$WORK/node.conf" <<EOF
@@ -154,12 +157,13 @@ tls_cert_file=/etc/risevpn/tls/fullchain.pem
 tls_key_file=/etc/risevpn/tls/privkey.pem
 traffic_stats_url=http://127.0.0.1:9999
 traffic_stats_secret=$TRAFFIC_SECRET
+obfs_password=$OBFS_PASSWORD
 release_public_key=$RELEASE_PUBLIC_KEY
 agent_version=$RELEASE_VERSION
 EOF
 
 escaped_url=$(printf '%s' "$MASQUERADE_URL" | sed 's/[&|]/\\&/g')
-sed -e "s|@TRAFFIC_SECRET@|$TRAFFIC_SECRET|g" -e "s|@MASQUERADE_URL@|$escaped_url|g" \
+sed -e "s|@TRAFFIC_SECRET@|$TRAFFIC_SECRET|g" -e "s|@OBFS_PASSWORD@|$OBFS_PASSWORD|g" -e "s|@MASQUERADE_URL@|$escaped_url|g" \
   "$WORK/packaging/hysteria-server.yaml.in" > "$WORK/hysteria.yaml"
 
 rollback_config=false
@@ -201,7 +205,12 @@ else
 fi
 
 systemctl daemon-reload
-systemctl enable --now risevpn-node.service risevpn-hysteria.service
+systemctl enable risevpn-node.service risevpn-hysteria.service
+if [ "$UPGRADE" = true ]; then
+  systemctl restart risevpn-node.service risevpn-hysteria.service
+else
+  systemctl start risevpn-node.service risevpn-hysteria.service
+fi
 
 healthy=false
 for attempt in 1 2 3 4 5 6 7 8 9 10; do

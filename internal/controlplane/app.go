@@ -756,7 +756,7 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		problem(w, 500, "credential", "Не удалось открыть конфигурацию", "")
 		return
 	}
-	uri := "hysteria2://" + url.QueryEscape(credential) + "@" + domain + ":443/?sni=" + url.QueryEscape(domain) + "#RiseVPN-Auto"
+	uri := hysteriaURI(credential, domain, a.config.HysteriaObfsPassword)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("profile-title", "RiseVPN · Auto")
 	w.Header().Set("profile-update-interval", "1")
@@ -769,6 +769,14 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+func hysteriaURI(credential, domain, obfsPassword string) string {
+	query := url.Values{"sni": []string{domain}}
+	if obfsPassword != "" {
+		query.Set("obfs", "salamander")
+		query.Set("obfs-password", obfsPassword)
+	}
+	return "hysteria2://" + url.QueryEscape(credential) + "@" + domain + ":443/?" + query.Encode() + "#RiseVPN-Auto"
+}
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
