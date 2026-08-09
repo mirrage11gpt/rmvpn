@@ -787,8 +787,9 @@ func hysteriaURI(credential, domain, obfsPassword string) string {
 
 func vlessWebSocketURI(credential, domain string) string {
 	query := url.Values{
+		"alpn":       {"http/1.1"},
 		"encryption": {"none"},
-		"fp":         {"ios"},
+		"fp":         {"randomized"},
 		"host":       {domain},
 		"path":       {"/risevpn-v1"},
 		"security":   {"tls"},

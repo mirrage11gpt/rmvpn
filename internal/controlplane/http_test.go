@@ -81,7 +81,7 @@ func TestVLESSWebSocketURI(t *testing.T) {
 	query := parsed.Query()
 	for key, expected := range map[string]string{
 		"security": "tls", "type": "ws", "sni": "f1.risevpn.space", "host": "f1.risevpn.space",
-		"fp": "ios", "path": "/risevpn-v1", "encryption": "none",
+		"fp": "randomized", "alpn": "http/1.1", "path": "/risevpn-v1", "encryption": "none",
 	} {
 		if query.Get(key) != expected {
 			t.Fatalf("unexpected %s: %q", key, query.Get(key))
