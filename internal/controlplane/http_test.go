@@ -81,7 +81,7 @@ func TestVLESSRealityURI(t *testing.T) {
 	query := parsed.Query()
 	for key, expected := range map[string]string{
 		"security": "reality", "flow": "xtls-rprx-vision", "type": "tcp", "sni": "f1.risevpn.space",
-		"fp": "chrome", "pbk": "public-key", "sid": "0123456789abcdef", "encryption": "none",
+		"fp": "firefox", "pbk": "public-key", "sid": "0123456789abcdef", "encryption": "none",
 	} {
 		if query.Get(key) != expected {
 			t.Fatalf("unexpected %s: %q", key, query.Get(key))

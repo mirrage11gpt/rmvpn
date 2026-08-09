@@ -789,7 +789,7 @@ func vlessRealityURI(credential, domain, publicKey, shortID string) string {
 	query := url.Values{
 		"encryption": {"none"},
 		"flow":       {"xtls-rprx-vision"},
-		"fp":         {"chrome"},
+		"fp":         {"firefox"},
 		"pbk":        {publicKey},
 		"security":   {"reality"},
 		"sid":        {shortID},
