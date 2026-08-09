@@ -4,11 +4,6 @@ tls:
   cert: /etc/risevpn/tls/fullchain.pem
   key: /etc/risevpn/tls/privkey.pem
 
-obfs:
-  type: salamander
-  salamander:
-    password: "@OBFS_PASSWORD@"
-
 auth:
   type: http
   http:
