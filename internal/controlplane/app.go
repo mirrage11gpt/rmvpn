@@ -692,9 +692,15 @@ func (a *App) subscriptionDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		if plan == "TRIAL" {
 			now := time.Now().UTC()
-			_, err = tx.Exec(r.Context(), `UPDATE subscriptions SET status='active',period_started_at=$1,period_ends_at=$2,quota_bytes=20000000000 WHERE user_id=(SELECT user_id FROM devices WHERE id=$3) AND status='pending_trial'; INSERT INTO trial_fingerprints(telegram_subject,hwid_hmac) VALUES($4,$5)`, now, now.Add(trialDuration), deviceID, subject, fingerprint)
-			periodEnd = ptrTime(now.Add(trialDuration))
-			status = "active"
+			trialEnd := now.Add(trialDuration)
+			_, err = tx.Exec(r.Context(), `UPDATE subscriptions SET status='active',period_started_at=$1,period_ends_at=$2,quota_bytes=20000000000 WHERE user_id=(SELECT user_id FROM devices WHERE id=$3) AND status='pending_trial'`, now, trialEnd, deviceID)
+			if err == nil {
+				_, err = tx.Exec(r.Context(), `INSERT INTO trial_fingerprints(telegram_subject,hwid_hmac) VALUES($1,$2)`, subject, fingerprint)
+			}
+			if err == nil {
+				periodEnd = ptrTime(trialEnd)
+				status = "active"
+			}
 		}
 		if err == nil {
 			_, err = tx.Exec(r.Context(), `UPDATE devices SET hwid_hmac=$1,last_bound_at=now(),last_seen_at=now() WHERE id=$2`, fingerprint, deviceID)
