@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-RELEASE_VERSION=0.2.4
+RELEASE_VERSION=0.2.5
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -11,7 +11,7 @@ LOCAL_DIR=
 UPGRADE=false
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.4] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.2.5] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -59,9 +59,22 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates curl certbot minisign nftables openssl iproute2
 
 getent ahosts "$DOMAIN" >/dev/null || { echo "domain does not resolve: $DOMAIN" >&2; exit 1; }
-PUBLIC_IP=$(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --max-time 15 https://api64.ipify.org)
-getent ahosts "$DOMAIN" | awk '{print $1}' | grep -Fqx "$PUBLIC_IP" || {
-  echo "DNS for $DOMAIN does not contain this server public IP ($PUBLIC_IP)" >&2
+PUBLIC_V4=$(curl -4 --proto '=https' --tlsv1.2 --fail --silent --show-error --max-time 15 https://api.ipify.org || true)
+PUBLIC_V6=$(curl -6 --proto '=https' --tlsv1.2 --fail --silent --show-error --max-time 15 https://api64.ipify.org || true)
+[ -n "$PUBLIC_V4$PUBLIC_V6" ] || { echo "could not determine this server public IP" >&2; exit 1; }
+DNS_ADDRESSES=$(
+  { getent ahostsv4 "$DOMAIN" 2>/dev/null || true; getent ahostsv6 "$DOMAIN" 2>/dev/null || true; } |
+    awk '{print $1}' | sort -u
+)
+dns_matches=false
+for public_ip in $PUBLIC_V4 $PUBLIC_V6; do
+  if printf '%s\n' "$DNS_ADDRESSES" | grep -Fqx "$public_ip"; then
+    dns_matches=true
+    break
+  fi
+done
+[ "$dns_matches" = true ] || {
+  echo "DNS for $DOMAIN does not contain this server public IPv4 or IPv6 address" >&2
   exit 1
 }
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --max-time 15 --output /dev/null "$MASQUERADE_URL"
