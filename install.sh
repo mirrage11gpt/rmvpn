@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-RELEASE_VERSION=0.3.0
+RELEASE_VERSION=0.3.1
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -11,7 +11,7 @@ LOCAL_DIR=
 UPGRADE=false
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.3.0] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.3.1] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -315,5 +315,9 @@ if [ "$healthy" != true ]; then
 fi
 
 echo
-echo "RiseVPN Node $RELEASE_VERSION is healthy. Enrollment key (valid for 24 hours):"
-/usr/local/lib/risevpn/risevpn-node-bin enrollment show --config /etc/risevpn/node.conf
+if [ "$UPGRADE" = true ]; then
+  echo "RiseVPN Node $RELEASE_VERSION is healthy. Existing enrollment remains active."
+else
+  echo "RiseVPN Node $RELEASE_VERSION is healthy. Enrollment key (valid for 24 hours):"
+  /usr/local/lib/risevpn/risevpn-node-bin enrollment show --config /etc/risevpn/node.conf
+fi
