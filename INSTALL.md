@@ -1,7 +1,7 @@
 # Установка RiseVPN
 
 Эта инструкция разворачивает один центральный сервер RiseVPN Control и одну или
-несколько локаций RiseVPN Node. Команды рассчитаны на release `v0.4.0`.
+несколько локаций RiseVPN Node. Команды рассчитаны на release `v0.4.1`.
 
 > Коммерческий запуск нельзя считать завершённым без юридического заключения,
 > реквизитов оператора, политики обработки персональных данных, российского
@@ -241,9 +241,9 @@ sudo apt update
 sudo apt install -y curl minisign
 mkdir -p risevpn-node-install
 cd risevpn-node-install
-curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.4.0/install.sh
-curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.4.0/checksums.txt
-curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.4.0/checksums.txt.minisig
+curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.4.1/install.sh
+curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.4.1/checksums.txt
+curl --fail --location --remote-name https://github.com/mirrage11gpt/rmvpn/releases/download/v0.4.1/checksums.txt.minisig
 minisign -Vm checksums.txt -x checksums.txt.minisig \
   -P 'RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZvdN+aLyCc'
 grep ' install.sh$' checksums.txt | sha256sum --check
@@ -257,7 +257,8 @@ sudo RISEVPN_RELEASE_PUBLIC_KEY='RWSn29kV+Wd2mrITWv/1AJZZLBImC/vVNjWInBYFLBletXZ
   --domain msk-1.example \
   --acme-email admin@example.com \
   --masquerade-url https://cover.example.com \
-  --version 0.4.0
+  --version 0.4.1 \
+  --allow-proxied-domain
 ```
 
 `masquerade-url` должен принадлежать оператору, открываться по HTTPS и иметь

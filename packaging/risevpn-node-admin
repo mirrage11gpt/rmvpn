@@ -38,7 +38,9 @@ case "${1:-}" in
     email=$(sed -n 's/^acme_email=//p' "$CONFIG")
     origin=$(sed -n 's/^masquerade_url=//p' "$CONFIG")
     release_key=$(sed -n 's/^release_public_key=//p' "$CONFIG")
-    exec /usr/local/lib/risevpn/install.sh --upgrade --domain "$domain" --acme-email "$email" --masquerade-url "$origin" --release-public-key "$release_key" "$@"
+    proxied=
+    if grep -q '^xray_transport=ws-tls$' "$CONFIG"; then proxied=--allow-proxied-domain; fi
+    exec /usr/local/lib/risevpn/install.sh --upgrade $proxied --domain "$domain" --acme-email "$email" --masquerade-url "$origin" --release-public-key "$release_key" "$@"
     ;;
   serve)
     exec "$BIN" "$@"

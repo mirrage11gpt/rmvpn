@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-RELEASE_VERSION=0.4.0
+RELEASE_VERSION=0.4.1
 DOMAIN=
 ACME_EMAIL=
 MASQUERADE_URL=
@@ -9,9 +9,10 @@ RELEASE_BASE_URL=https://github.com/mirrage11gpt/rmvpn/releases/download
 RELEASE_PUBLIC_KEY=${RISEVPN_RELEASE_PUBLIC_KEY:-}
 LOCAL_DIR=
 UPGRADE=false
+ALLOW_PROXIED_DOMAIN=${RISEVPN_ALLOW_PROXIED_DOMAIN:-false}
 
 usage() {
-  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.4.0] [--release-public-key RW...]" >&2
+  echo "usage: sudo ./install.sh --domain vpn.example.com --acme-email admin@example.com --masquerade-url https://cover.example.com [--version 0.4.1] [--allow-proxied-domain] [--release-public-key RW...]" >&2
   exit 2
 }
 
@@ -25,6 +26,7 @@ while [ "$#" -gt 0 ]; do
     --release-public-key) RELEASE_PUBLIC_KEY=${2:-}; shift 2 ;;
     --local-dir) LOCAL_DIR=${2:-}; shift 2 ;;
     --upgrade) UPGRADE=true; shift ;;
+    --allow-proxied-domain) ALLOW_PROXIED_DOMAIN=true; shift ;;
     *) usage ;;
   esac
 done
@@ -73,10 +75,10 @@ for public_ip in $PUBLIC_V4 $PUBLIC_V6; do
     break
   fi
 done
-[ "$dns_matches" = true ] || {
-  echo "DNS for $DOMAIN does not contain this server public IPv4 or IPv6 address" >&2
+if [ "$dns_matches" != true ] && [ "$ALLOW_PROXIED_DOMAIN" != true ]; then
+  echo "DNS for $DOMAIN does not contain this server public IPv4 or IPv6 address; use --allow-proxied-domain only when a trusted CDN proxies this hostname" >&2
   exit 1
-}
+fi
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --max-time 15 --output /dev/null "$MASQUERADE_URL"
 
 if [ "$UPGRADE" = false ]; then
