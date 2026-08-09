@@ -141,6 +141,7 @@ func (h *NodeHub) readLoop(ctx context.Context, nodeID string, c *nodeConnection
 			if status == "acked" {
 				_, _ = h.db.Exec(ctx, `UPDATE nodes SET compliance_fetched_at=now(),compliance_version=c.payload->>'version' FROM node_commands c WHERE nodes.id=$1 AND c.id=$2 AND c.node_id=nodes.id AND c.type='compliance.feed'`, nodeID, env.ReplyTo)
 				_, _ = h.db.Exec(ctx, `UPDATE nodes SET certificate_serial=next_certificate_serial,certificate_not_after=next_certificate_not_after,next_certificate_serial=NULL,next_certificate_not_after=NULL FROM node_commands c WHERE nodes.id=$1 AND c.id=$2 AND c.node_id=nodes.id AND c.type='certificate.rotate'`, nodeID, env.ReplyTo)
+				_, _ = h.db.Exec(ctx, `UPDATE node_assignments SET provisioned_at=now(),updated_at=now() FROM node_commands c WHERE node_assignments.node_id=$1 AND c.id=$2 AND c.node_id=node_assignments.node_id AND c.type='device.upsert' AND node_assignments.device_id=(c.payload->>'deviceId')::uuid`, nodeID, env.ReplyTo)
 			}
 		case "usage.batch":
 			_ = h.usage(ctx, nodeID, env, c)

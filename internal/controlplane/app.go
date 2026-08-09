@@ -422,7 +422,7 @@ func (a *App) me(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"id": s.UserID, "displayName": name, "username": username, "status": status, "balanceKopecks": balance, "role": role, "csrfToken": s.CSRF, "termsAccepted": termsAccepted})
 }
 
-const currentTermsVersion = "2026-08-09.2"
+const currentTermsVersion = "2026-08-09"
 
 func (a *App) acceptTerms(w http.ResponseWriter, r *http.Request) {
 	s := currentSession(r)

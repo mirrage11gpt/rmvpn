@@ -22,10 +22,45 @@ import (
 
 func (a *App) StartWorkers(ctx context.Context) {
 	go a.workerLoop(ctx, "lifecycle", time.Minute, a.subscriptionLifecycle)
+	go a.workerLoop(ctx, "quota-renewal", 30*time.Second, a.renewQuotaLeases)
 	go a.workerLoop(ctx, "notifications", 20*time.Second, a.deliverNotifications)
 	go a.workerLoop(ctx, "compliance", 15*time.Minute, a.refreshCompliance)
 	go a.workerLoop(ctx, "retention", 24*time.Hour, a.enforceRetention)
 	go a.workerLoop(ctx, "certificate-rotation", 6*time.Hour, a.rotateCertificates)
+}
+
+func (a *App) renewQuotaLeases(ctx context.Context) error {
+	rows, err := a.db.Query(ctx, `SELECT d.id::text,a.node_id::text
+		FROM devices d
+		JOIN subscriptions s ON s.user_id=d.user_id
+		JOIN users u ON u.id=d.user_id
+		JOIN node_assignments a ON a.device_id=d.id
+		WHERE d.revoked_at IS NULL AND u.status='active' AND s.status IN ('active','grace')
+		AND NOT EXISTS (SELECT 1 FROM quota_leases q WHERE q.device_id=d.id AND q.expires_at>now())`)
+	if err != nil {
+		return err
+	}
+	type assignment struct{ deviceID, nodeID string }
+	var due []assignment
+	for rows.Next() {
+		var item assignment
+		if err := rows.Scan(&item.deviceID, &item.nodeID); err != nil {
+			rows.Close()
+			return err
+		}
+		due = append(due, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, item := range due {
+		if err := a.provisionDevice(ctx, item.deviceID, item.nodeID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (a *App) workerLoop(ctx context.Context, name string, every time.Duration, job func(context.Context) error) {
 	if err := job(ctx); err != nil {
